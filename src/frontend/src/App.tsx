@@ -1,3 +1,4 @@
+import { AppShell } from "@/components/AppShell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +58,7 @@ import {
   Lock,
   Mail,
   MessageCircle,
+  Newspaper,
   Paperclip,
   Pencil,
   Phone,
@@ -64,6 +66,8 @@ import {
   Scale,
   Search,
   Send,
+  Share2,
+  ThumbsUp,
   Trash2,
   UploadCloud,
   User,
@@ -95,7 +99,8 @@ type Screen =
   | "hearings"
   | "calendar"
   | "find-advocates"
-  | "advocate-discovery-profile";
+  | "advocate-discovery-profile"
+  | "legal-feed";
 type LoginTab = "password" | "otp";
 type OtpStep = "phone" | "verify";
 type OtpPhase = "mobile" | "verify" | "form";
@@ -486,6 +491,185 @@ function seedSampleAdvocates() {
   localStorage.setItem(LS_SEEDED_KEY, "1");
 }
 
+// ─── Legal Feed Demo Data ─────────────────────────────────────────────────────
+
+interface DemoPost {
+  id: string;
+  authorName: string;
+  authorInitials: string;
+  authorAvatarColor: string;
+  practiceArea: string;
+  text: string;
+  hasImage: boolean;
+  timeAgo: string;
+  likes: number;
+  comments: number;
+  shares: number;
+}
+
+interface UserPost {
+  id: string;
+  authorName: string;
+  authorInitials: string;
+  authorAvatarColor: string;
+  authorPhoto?: string;
+  practiceArea: string;
+  text: string;
+  imageDataUrl?: string;
+  timestamp: string; // ISO string
+  likes: number;
+  comments: number;
+  shares: number;
+}
+
+const LS_FEED_POSTS_KEY = "myadvocate_feed_posts";
+
+function loadUserPosts(): UserPost[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_FEED_POSTS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveUserPosts(posts: UserPost[]) {
+  try {
+    localStorage.setItem(LS_FEED_POSTS_KEY, JSON.stringify(posts));
+  } catch {
+    // If quota exceeded, try without images
+    try {
+      const withoutImages = posts.map(({ imageDataUrl: _, ...rest }) => rest);
+      localStorage.setItem(LS_FEED_POSTS_KEY, JSON.stringify(withoutImages));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function formatTimeAgo(isoStr: string): string {
+  const diffMs = Date.now() - new Date(isoStr).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "Just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? "" : "s"} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? "" : "s"} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
+  return new Date(isoStr).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const DEMO_POSTS: DemoPost[] = [
+  {
+    id: "post-1",
+    authorName: "Arjun Sharma",
+    authorInitials: "AS",
+    authorAvatarColor: "bg-blue-600",
+    practiceArea: "Criminal Law",
+    text: "Landmark judgment today at Delhi High Court: The bench clarified that bail cannot be denied solely on the basis of severity of the alleged offence. The court must examine flight risk, tampering of evidence, and likelihood of repetition independently. This reaffirms the fundamental principle that bail is the rule and jail is the exception. #CriminalLaw #BailJurisprudence",
+    hasImage: false,
+    timeAgo: "2 hours ago",
+    likes: 87,
+    comments: 14,
+    shares: 23,
+  },
+  {
+    id: "post-2",
+    authorName: "Priya Nair",
+    authorInitials: "PN",
+    authorAvatarColor: "bg-rose-600",
+    practiceArea: "Family Law",
+    text: "Important reminder for matrimonial cases: Under Section 125 CrPC, interim maintenance can now be ordered within 60 days of the first hearing as per the new Supreme Court guidelines. Many clients are unaware of this timeline and delay filing. Share this with anyone navigating a maintenance dispute.",
+    hasImage: false,
+    timeAgo: "4 hours ago",
+    likes: 62,
+    comments: 9,
+    shares: 31,
+  },
+  {
+    id: "post-3",
+    authorName: "Ravi Krishnan",
+    authorInitials: "RK",
+    authorAvatarColor: "bg-emerald-600",
+    practiceArea: "Corporate Law",
+    text: "The NCLT Chennai Bench recently ruled on a significant insolvency matter where the personal guarantor's assets were held liable under IBC. The judgment has far-reaching implications for promoters of MSMEs who personally guarantee corporate loans. Corporate counsel should advise clients to review guarantee exposure carefully. #IBC #Insolvency #CorporateLaw",
+    hasImage: true,
+    timeAgo: "6 hours ago",
+    likes: 134,
+    comments: 28,
+    shares: 45,
+  },
+  {
+    id: "post-4",
+    authorName: "Meera Verma",
+    authorInitials: "MV",
+    authorAvatarColor: "bg-violet-600",
+    practiceArea: "Property Law",
+    text: "RERA Update: The Allahabad High Court has upheld a homebuyer's right to seek refund with interest even after taking possession of a flat that was delayed by more than 3 years. Builders cannot claim the delay was due to force majeure without producing documentary evidence. Homebuyers, know your rights! #RERA #PropertyLaw #RealEstate",
+    hasImage: false,
+    timeAgo: "Yesterday",
+    likes: 109,
+    comments: 22,
+    shares: 57,
+  },
+  {
+    id: "post-5",
+    authorName: "Sameer Bose",
+    authorInitials: "SB",
+    authorAvatarColor: "bg-amber-600",
+    practiceArea: "Tax Law",
+    text: "GST Council update: The council has clarified that legal services provided by individual advocates are exempt from GST when provided to any business entity. However, senior advocates charging fees above ₹20 lakh per year must register under reverse charge mechanism. Make sure your billing compliance is up to date. #GST #TaxLaw #AdvocateRCM",
+    hasImage: false,
+    timeAgo: "1 day ago",
+    likes: 78,
+    comments: 17,
+    shares: 29,
+  },
+  {
+    id: "post-6",
+    authorName: "Karan Malhotra",
+    authorInitials: "KM",
+    authorAvatarColor: "bg-sky-600",
+    practiceArea: "Constitutional Law",
+    text: "The Supreme Court's recent five-judge bench verdict on Article 370 provides an in-depth study on the nature of federalism in India. The judgment runs to 476 pages — I've prepared a 10-point summary for my fellow practitioners. Feel free to comment 'NOTES' below and I'll share it with you directly.",
+    hasImage: true,
+    timeAgo: "2 days ago",
+    likes: 312,
+    comments: 74,
+    shares: 98,
+  },
+  {
+    id: "post-7",
+    authorName: "Neha Gupta",
+    authorInitials: "NG",
+    authorAvatarColor: "bg-pink-600",
+    practiceArea: "Labour Law",
+    text: "Important for HR and employment lawyers: The Industrial Relations Code 2020 now mandates that any establishment with 300 or more workers must obtain prior government permission before layoffs, retrenchment, or closure. Earlier this threshold was 100 workers. Compliance teams must update their workforce management policies accordingly. #LabourLaw #IRCode #Employment",
+    hasImage: false,
+    timeAgo: "2 days ago",
+    likes: 91,
+    comments: 11,
+    shares: 34,
+  },
+  {
+    id: "post-8",
+    authorName: "Vikram Desai",
+    authorInitials: "VD",
+    authorAvatarColor: "bg-teal-600",
+    practiceArea: "Civil Law",
+    text: "Excited to share that my article on 'Procedural Reforms under the New CPC Amendment' has been published in the Indian Law Review. The amendments significantly reduce adjournments and introduce timelines for filing written statements. A long overdue step toward decongesting our courts. Link in comments. #CivilProcedure #LegalReform",
+    hasImage: true,
+    timeAgo: "3 days ago",
+    likes: 156,
+    comments: 33,
+    shares: 61,
+  },
+];
+
 // ─── Case Data ────────────────────────────────────────────────────────────────
 
 interface StoredCase {
@@ -810,6 +994,7 @@ function getUnreadCount(conversationId: string, readerMobile: string): number {
   ).length;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: retained for upcoming navigation rebuild
 function getTotalUnreadCount(
   myMobile: string,
   myRole: "advocate" | "client",
@@ -3199,7 +3384,7 @@ function PageHeader({
 }
 
 // ─── Dashboard Client Hearings Preview ───────────────────────────────────────
-
+// biome-ignore lint/correctness/noUnusedVariables: retained for upcoming navigation rebuild
 function DashboardClientHearingsPreview({
   clientMobile,
   onViewAll,
@@ -3275,7 +3460,7 @@ function DashboardClientHearingsPreview({
 }
 
 // ─── Dashboard Hearings Preview ───────────────────────────────────────────────
-
+// biome-ignore lint/correctness/noUnusedVariables: retained for upcoming navigation rebuild
 function DashboardHearingsPreview({
   advocateId,
   onViewAll,
@@ -3359,437 +3544,6 @@ function DashboardHearingsPreview({
           +{getUpcomingHearings(advocateId).length - 3} more hearings →
         </button>
       )}
-    </div>
-  );
-}
-
-// ─── Dashboard ────────────────────────────────────────────────────────────────
-
-function DashboardScreen({
-  user,
-  onLogout,
-  onNavigate,
-}: {
-  user: StoredUser | null;
-  onLogout: () => void;
-  onNavigate: (screen: Screen) => void;
-}) {
-  const profile = user ? loadProfile(user.mobile) : null;
-  const isAdvocate = user?.role === "advocate";
-
-  const displayName =
-    profile?.fullName ||
-    (user?.mobile === "google-demo" ? "Demo User" : "User");
-  const initials = displayName
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  type CardDef = {
-    ocid: string;
-    icon: React.ElementType;
-    label: string;
-    desc: string;
-    color: string;
-    iconColor: string;
-    screen: Screen;
-  };
-
-  const advocateCards: CardDef[] = [
-    {
-      ocid: "dashboard.profile.card",
-      icon: User,
-      label: "My Profile",
-      desc: "View & edit your profile",
-      color: "bg-blue-50",
-      iconColor: "text-blue-600",
-      screen: "my-profile",
-    },
-    {
-      ocid: "dashboard.cases.card",
-      icon: Briefcase,
-      label: "My Cases",
-      desc: "Track your legal cases",
-      color: "bg-indigo-50",
-      iconColor: "text-indigo-600",
-      screen: "my-cases",
-    },
-    {
-      ocid: "dashboard.messages.card",
-      icon: MessageCircle,
-      label: "Messages",
-      desc: "Chat with your contacts",
-      color: "bg-sky-50",
-      iconColor: "text-sky-600",
-      screen: "messages",
-    },
-    {
-      ocid: "dashboard.clients.card",
-      icon: Users,
-      label: "My Clients",
-      desc: "Clients connected via referral",
-      color: "bg-emerald-50",
-      iconColor: "text-emerald-600",
-      screen: "my-clients",
-    },
-    {
-      ocid: "dashboard.hearings.card",
-      icon: CalendarDays,
-      label: "Hearings",
-      desc: "Upcoming court hearings",
-      color: "bg-violet-50",
-      iconColor: "text-violet-600",
-      screen: "hearings",
-    },
-    {
-      ocid: "dashboard.calendar.card",
-      icon: Calendar,
-      label: "Calendar",
-      desc: "View hearing calendar",
-      color: "bg-purple-50",
-      iconColor: "text-purple-600",
-      screen: "calendar",
-    },
-    {
-      ocid: "dashboard.find-advocates.card",
-      icon: Search,
-      label: "Find Advocates",
-      desc: "Search and network with advocates",
-      color: "bg-amber-50",
-      iconColor: "text-amber-600",
-      screen: "find-advocates",
-    },
-  ];
-
-  const clientCards: CardDef[] = [
-    {
-      ocid: "dashboard.profile.card",
-      icon: User,
-      label: "My Profile",
-      desc: "View & edit your profile",
-      color: "bg-blue-50",
-      iconColor: "text-blue-600",
-      screen: "my-profile",
-    },
-    {
-      ocid: "dashboard.cases.card",
-      icon: Briefcase,
-      label: "My Cases",
-      desc: "Track your legal cases",
-      color: "bg-indigo-50",
-      iconColor: "text-indigo-600",
-      screen: "my-cases",
-    },
-    {
-      ocid: "dashboard.messages.card",
-      icon: MessageCircle,
-      label: "Messages",
-      desc: "Chat with your contacts",
-      color: "bg-sky-50",
-      iconColor: "text-sky-600",
-      screen: "messages",
-    },
-    {
-      ocid: "dashboard.calendar.card",
-      icon: Calendar,
-      label: "Calendar",
-      desc: "View hearing calendar",
-      color: "bg-purple-50",
-      iconColor: "text-purple-600",
-      screen: "calendar",
-    },
-    {
-      ocid: "dashboard.find-advocates.card",
-      icon: Search,
-      label: "Find Advocates",
-      desc: "Search and connect with advocates",
-      color: "bg-amber-50",
-      iconColor: "text-amber-600",
-      screen: "find-advocates",
-    },
-  ];
-
-  const cards = isAdvocate ? advocateCards : clientCards;
-
-  return (
-    <div
-      data-ocid="dashboard.section"
-      className="flex flex-col min-h-screen bg-background"
-    >
-      {/* ── Sticky header ── */}
-      <header className="sticky top-0 z-10 flex items-center justify-between w-full px-5 py-3 border-b border-border bg-white shadow-sm">
-        <button
-          data-ocid="dashboard.header.link"
-          type="button"
-          aria-label="My Advocate – home"
-          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
-        >
-          <img
-            src="/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png"
-            alt="My Advocate"
-            style={{ height: 44, width: "auto" }}
-            className="object-contain"
-            draggable={false}
-          />
-        </button>
-
-        <div className="flex items-center gap-2">
-          {/* Profile avatar button */}
-          <button
-            data-ocid="dashboard.profile.button"
-            type="button"
-            onClick={() => onNavigate("my-profile")}
-            className="w-10 h-10 rounded-full overflow-hidden border-2 border-border hover:border-primary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="User profile"
-          >
-            {profile?.profilePhoto ? (
-              <img
-                src={profile.profilePhoto}
-                alt={displayName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
-                <span className="text-xs font-bold text-primary leading-none">
-                  {initials}
-                </span>
-              </div>
-            )}
-          </button>
-
-          {/* Sign out */}
-          <button
-            data-ocid="dashboard.logout.button"
-            type="button"
-            onClick={() => {
-              onLogout();
-            }}
-            className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Sign out"
-          >
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {/* ── Main content ── */}
-      <main className="flex flex-col flex-1 overflow-y-auto">
-        {/* Cover photo (advocate only) */}
-        {isAdvocate && (
-          <div
-            className="relative w-full overflow-hidden shrink-0 bg-gradient-to-r from-primary/80 to-primary"
-            style={{ height: 200 }}
-          >
-            {profile?.coverPhoto ? (
-              <img
-                src={profile.coverPhoto}
-                alt="Cover"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center opacity-10">
-                <Briefcase className="w-16 h-16 text-white" />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Profile section */}
-        <div
-          className={`flex flex-col items-center px-6 pb-5 ${isAdvocate ? "" : "pt-8"}`}
-        >
-          {/* Avatar — straddles cover/content boundary for advocates */}
-          <div
-            className={`w-[120px] h-[120px] rounded-full border-4 border-white shadow-lg bg-white overflow-hidden ${isAdvocate ? "-mt-[60px]" : ""}`}
-          >
-            {profile?.profilePhoto ? (
-              <img
-                src={profile.profilePhoto}
-                alt={displayName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
-                <span className="text-xl font-bold text-primary">
-                  {initials}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Name + role + meta */}
-          <div className="mt-3 text-center">
-            <h1 className="text-xl font-bold text-foreground tracking-tight">
-              {displayName}
-            </h1>
-
-            {isAdvocate ? (
-              <div className="flex flex-col items-center gap-1 mt-1">
-                {profile?.practiceArea && (
-                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
-                    {profile.practiceArea}
-                  </span>
-                )}
-                <div className="flex items-center gap-2 mt-1 flex-wrap justify-center">
-                  {profile?.courtName && (
-                    <span className="text-xs text-muted-foreground">
-                      {profile.courtName}
-                    </span>
-                  )}
-                  {profile?.courtName && profile?.city && (
-                    <span className="text-muted-foreground text-xs">·</span>
-                  )}
-                  {(profile?.city || profile?.state) && (
-                    <span className="text-xs text-muted-foreground">
-                      {[profile.city, profile.state].filter(Boolean).join(", ")}
-                    </span>
-                  )}
-                </div>
-                {profile?.yearsExp && (
-                  <p className="text-xs text-muted-foreground">
-                    {profile.yearsExp}{" "}
-                    {Number(profile.yearsExp) === 1 ? "year" : "years"} of
-                    experience
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div className="mt-1">
-                {(profile?.city || profile?.state) && (
-                  <p className="text-xs text-muted-foreground">
-                    {[profile?.city, profile?.state].filter(Boolean).join(", ")}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {profile?.bio && (
-              <p className="text-xs text-muted-foreground mt-2 max-w-[280px] mx-auto leading-relaxed line-clamp-3">
-                {profile.bio}
-              </p>
-            )}
-          </div>
-
-          {/* Divider */}
-          <div className="w-full h-px bg-border mt-5 mb-5" />
-
-          {/* Platform message */}
-          <div className="text-center mb-5 px-2">
-            <h2 className="text-base font-semibold text-foreground">
-              Welcome to My Advocate
-            </h2>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              India's Professional Legal Network
-            </p>
-          </div>
-
-          {/* Quick access cards */}
-          {(() => {
-            const totalUnread = user
-              ? getTotalUnreadCount(user.mobile, user.role)
-              : 0;
-            return (
-              <div
-                className={`grid gap-3 w-full ${isAdvocate ? "grid-cols-3" : "grid-cols-3"}`}
-              >
-                {cards.map(
-                  ({
-                    ocid,
-                    icon: Icon,
-                    label,
-                    desc,
-                    color,
-                    iconColor,
-                    screen: targetScreen,
-                  }) => (
-                    <button
-                      key={label}
-                      data-ocid={ocid}
-                      type="button"
-                      onClick={() => onNavigate(targetScreen)}
-                      className="relative flex flex-col items-center gap-2.5 bg-white rounded-2xl border border-border shadow-sm px-2 py-5 hover:shadow-md hover:border-primary/30 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
-                      aria-label={label}
-                      title={desc}
-                    >
-                      <div
-                        className={`relative w-12 h-12 rounded-full ${color} flex items-center justify-center`}
-                      >
-                        <Icon className={`w-5 h-5 ${iconColor}`} />
-                        {targetScreen === "messages" && totalUnread > 0 && (
-                          <span
-                            data-ocid="dashboard.messages.badge"
-                            className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 border-2 border-white"
-                          >
-                            {totalUnread > 99 ? "99+" : totalUnread}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-xs font-semibold text-foreground text-center leading-tight">
-                        {label}
-                      </span>
-                    </button>
-                  ),
-                )}
-              </div>
-            );
-          })()}
-
-          {/* ── Upcoming Hearings (advocate only) ── */}
-          {isAdvocate && user && (
-            <div data-ocid="dashboard.hearings.section" className="w-full mt-5">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-                  <CalendarDays className="w-4 h-4 text-violet-500" />
-                  Upcoming Hearings
-                </h2>
-                <button
-                  data-ocid="dashboard.hearings.link"
-                  type="button"
-                  onClick={() => onNavigate("hearings")}
-                  className="text-xs text-primary font-semibold hover:underline focus-visible:outline-none"
-                >
-                  View All
-                </button>
-              </div>
-              <DashboardHearingsPreview
-                advocateId={user.mobile}
-                onViewAll={() => onNavigate("hearings")}
-              />
-            </div>
-          )}
-
-          {/* ── Upcoming Hearings (client only) ── */}
-          {!isAdvocate && user && (
-            <div
-              data-ocid="dashboard.client_hearings.section"
-              className="w-full mt-5"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
-                  <CalendarDays className="w-4 h-4 text-purple-500" />
-                  Upcoming Hearings
-                </h2>
-                <button
-                  data-ocid="dashboard.client_hearings.link"
-                  type="button"
-                  onClick={() => onNavigate("calendar")}
-                  className="text-xs text-primary font-semibold hover:underline focus-visible:outline-none"
-                >
-                  View All
-                </button>
-              </div>
-              <DashboardClientHearingsPreview
-                clientMobile={user.mobile}
-                onViewAll={() => onNavigate("calendar")}
-              />
-            </div>
-          )}
-        </div>
-      </main>
-
-      <AppFooter />
     </div>
   );
 }
@@ -10404,6 +10158,456 @@ function AdvocateDiscoveryProfilePage({
   );
 }
 
+// ─── Legal Feed Screen ────────────────────────────────────────────────────────
+
+function getAvatarColorFromName(name: string): string {
+  const colors = [
+    "bg-blue-600",
+    "bg-rose-600",
+    "bg-emerald-600",
+    "bg-violet-600",
+    "bg-amber-600",
+    "bg-sky-600",
+    "bg-pink-600",
+    "bg-teal-600",
+    "bg-indigo-600",
+    "bg-orange-600",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function LegalFeedScreen({
+  currentUser,
+  currentProfile,
+  onBack,
+}: {
+  currentUser: StoredUser;
+  currentProfile: StoredProfile | null;
+  onBack: () => void;
+}) {
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [userPosts, setUserPosts] = useState<UserPost[]>(() => loadUserPosts());
+  const [postText, setPostText] = useState("");
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [isPosting, setIsPosting] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const displayName =
+    currentProfile?.fullName ||
+    (currentUser.mobile === "google-demo" ? "Demo User" : "User");
+  const initials = displayName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  function toggleLike(postId: string) {
+    setLikedPosts((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) {
+        next.delete(postId);
+      } else {
+        next.add(postId);
+      }
+      return next;
+    });
+  }
+
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result;
+      if (typeof result === "string") {
+        setPostImage(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    // Reset the input so the same file can be re-selected
+    e.target.value = "";
+  }
+
+  function handleSubmitPost() {
+    const trimmedText = postText.trim();
+    if (!trimmedText) return;
+
+    setIsPosting(true);
+
+    const authorName = displayName;
+    const authorInitials = initials;
+    const authorAvatarColor = getAvatarColorFromName(authorName);
+
+    const newPost: UserPost = {
+      id: `user_post_${Date.now()}`,
+      authorName,
+      authorInitials,
+      authorAvatarColor,
+      authorPhoto: currentProfile?.profilePhoto || undefined,
+      practiceArea:
+        (currentProfile as { practiceArea?: string } | null)?.practiceArea ||
+        "Advocate",
+      text: trimmedText,
+      imageDataUrl: postImage || undefined,
+      timestamp: new Date().toISOString(),
+      likes: 0,
+      comments: 0,
+      shares: 0,
+    };
+
+    setUserPosts((prev) => {
+      const updated = [newPost, ...prev];
+      saveUserPosts(updated);
+      return updated;
+    });
+
+    setPostText("");
+    setPostImage(null);
+    setIsPosting(false);
+    toast.success("Post shared!");
+  }
+
+  // Combined feed: user posts first (newest), then demo posts
+  const allPosts = [...userPosts, ...DEMO_POSTS];
+
+  return (
+    <div
+      data-ocid="legal-feed.page"
+      className="flex flex-col min-h-screen bg-background"
+    >
+      {/* ── Sticky header ── */}
+      <header className="sticky top-0 z-10 flex items-center justify-between w-full px-5 py-3 border-b border-border bg-white shadow-sm">
+        <button
+          type="button"
+          aria-label="My Advocate – home"
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+        >
+          <img
+            src="/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png"
+            alt="My Advocate"
+            style={{ height: 44, width: "auto" }}
+            className="object-contain"
+            draggable={false}
+          />
+        </button>
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-border">
+            {currentProfile?.profilePhoto ? (
+              <img
+                src={currentProfile.profilePhoto}
+                alt={displayName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                <span className="text-xs font-bold text-primary leading-none">
+                  {initials}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main content ── */}
+      <main className="flex flex-col flex-1 overflow-y-auto pb-8">
+        {/* Back button + page title */}
+        <div className="px-4 pt-4 pb-2">
+          <button
+            data-ocid="legal-feed.back.button"
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Dashboard
+          </button>
+          <div className="flex items-center gap-2 mb-1">
+            <Newspaper className="w-5 h-5 text-primary" />
+            <h1 className="text-lg font-bold text-foreground">Legal Feed</h1>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Stay updated with the legal community
+          </p>
+        </div>
+
+        <div className="px-4 flex flex-col gap-3">
+          {/* ── Create Post card ── */}
+          <div
+            data-ocid="legal-feed.create_post.card"
+            className="bg-white rounded-xl border border-border shadow-sm p-4"
+          >
+            <div className="flex items-start gap-3">
+              {/* User avatar */}
+              <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border shrink-0 mt-0.5">
+                {currentProfile?.profilePhoto ? (
+                  <img
+                    src={currentProfile.profilePhoto}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-xs font-bold text-primary leading-none">
+                      {initials}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Text input */}
+              <div className="flex-1 min-w-0">
+                <Textarea
+                  data-ocid="legal-feed.create_post.textarea"
+                  value={postText}
+                  onChange={(e) => setPostText(e.target.value)}
+                  placeholder="Share legal knowledge, case insights, or legal updates..."
+                  rows={3}
+                  className="w-full resize-none text-sm bg-muted/30 border-border rounded-lg focus:bg-white transition-colors placeholder:text-muted-foreground/70 min-h-[80px]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handleSubmitPost();
+                    }
+                  }}
+                />
+
+                {/* Image preview */}
+                {postImage && (
+                  <div
+                    data-ocid="legal-feed.create_post.image_preview"
+                    className="mt-2 relative inline-block"
+                  >
+                    <img
+                      src={postImage}
+                      alt="Selected attachment preview"
+                      className="w-16 h-16 rounded-lg object-cover border border-border"
+                    />
+                    <button
+                      data-ocid="legal-feed.create_post.remove_image.button"
+                      type="button"
+                      onClick={() => setPostImage(null)}
+                      aria-label="Remove image"
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground text-background flex items-center justify-center shadow-sm hover:bg-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Bottom action row */}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button
+                    data-ocid="legal-feed.create_post.add_image.button"
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary border border-border rounded-lg px-3 py-1.5 hover:border-primary/40 hover:bg-primary/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    Add Image
+                  </button>
+
+                  <Button
+                    data-ocid="legal-feed.create_post.submit_button"
+                    type="button"
+                    size="sm"
+                    disabled={!postText.trim() || isPosting}
+                    onClick={handleSubmitPost}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    {isPosting ? "Posting..." : "Post"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+          </div>
+
+          {/* ── Post cards ── */}
+          {allPosts.map((post, idx) => {
+            const isUserPost = "timestamp" in post;
+            const postId = post.id;
+            const isLiked = likedPosts.has(postId);
+            const likeCount = post.likes + (isLiked ? 1 : 0);
+            const timeLabel = isUserPost
+              ? formatTimeAgo((post as UserPost).timestamp)
+              : (post as DemoPost).timeAgo;
+
+            return (
+              <div
+                key={postId}
+                data-ocid={
+                  isUserPost
+                    ? `legal-feed.user_post.item.${idx + 1}`
+                    : `legal-feed.post.item.${idx + 1 - userPosts.length}`
+                }
+                className="bg-white rounded-xl border border-border shadow-sm overflow-hidden"
+              >
+                {/* Post header */}
+                <div className="flex items-start gap-3 p-4 pb-3">
+                  {/* Author avatar */}
+                  {isUserPost && (post as UserPost).authorPhoto ? (
+                    <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-border shrink-0 shadow-sm">
+                      <img
+                        src={(post as UserPost).authorPhoto}
+                        alt={post.authorName}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className={`w-11 h-11 rounded-full ${post.authorAvatarColor} flex items-center justify-center shrink-0 shadow-sm`}
+                    >
+                      <span className="text-sm font-bold text-white leading-none">
+                        {post.authorInitials}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Author info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-foreground leading-tight">
+                          {post.authorName}
+                        </p>
+                        <span className="inline-flex items-center text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full mt-0.5">
+                          {post.practiceArea}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">
+                        {timeLabel}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Post text */}
+                <div className="px-4 pb-3">
+                  <p className="text-sm text-foreground leading-relaxed">
+                    {post.text}
+                  </p>
+                </div>
+
+                {/* Post image */}
+                {isUserPost && (post as UserPost).imageDataUrl ? (
+                  <div className="mx-4 mb-3 rounded-xl overflow-hidden max-h-64">
+                    <img
+                      src={(post as UserPost).imageDataUrl}
+                      alt="Attached media"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : !isUserPost && (post as DemoPost).hasImage ? (
+                  <div className="mx-4 mb-3 bg-muted/40 rounded-xl h-44 flex flex-col items-center justify-center border border-border gap-2">
+                    <ImageIcon className="w-8 h-8 text-muted-foreground/50" />
+                    <span className="text-xs text-muted-foreground">Image</span>
+                  </div>
+                ) : null}
+
+                {/* Engagement counts */}
+                <div className="px-4 pb-2 flex items-center gap-4">
+                  <span className="text-[10px] text-muted-foreground">
+                    {likeCount} likes
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {post.comments} comments
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {post.shares} shares
+                  </span>
+                </div>
+
+                {/* Divider */}
+                <div className="mx-4 h-px bg-border" />
+
+                {/* Action buttons */}
+                <div className="flex items-center px-2 py-1">
+                  <button
+                    data-ocid={`legal-feed.like.button.${idx + 1}`}
+                    type="button"
+                    onClick={() => toggleLike(postId)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      isLiked
+                        ? "text-primary hover:bg-primary/5"
+                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    }`}
+                    aria-label="Like"
+                    aria-pressed={isLiked}
+                  >
+                    <ThumbsUp
+                      className={`w-4 h-4 ${isLiked ? "fill-primary" : ""}`}
+                    />
+                    Like
+                  </button>
+                  <button
+                    data-ocid={`legal-feed.comment.button.${idx + 1}`}
+                    type="button"
+                    onClick={() =>
+                      toast.info("Comments coming soon!", {
+                        description:
+                          "Comment threads will be available in the next release.",
+                      })
+                    }
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Comment"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Comment
+                  </button>
+                  <button
+                    data-ocid={`legal-feed.share.button.${idx + 1}`}
+                    type="button"
+                    onClick={() =>
+                      toast.info("Share coming soon!", {
+                        description:
+                          "Post sharing will be available in the next release.",
+                      })
+                    }
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Share"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    Share
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="text-center text-[11px] text-muted-foreground mt-6 px-4">
+          <p>
+            © {new Date().getFullYear()}{" "}
+            <a
+              href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground transition-colors"
+            >
+              Built with love using caffeine.ai
+            </a>
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -10423,6 +10627,7 @@ export default function App() {
   const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
   const [selectedDiscoveryAdvocateId, setSelectedDiscoveryAdvocateId] =
     useState<string | null>(null);
+  const [activeShellTab, setActiveShellTab] = useState<string>("home");
 
   // Seed sample advocates once on first mount
   useEffect(() => {
@@ -10542,10 +10747,12 @@ export default function App() {
         )}
 
         {screen === "dashboard" && (
-          <DashboardScreen
-            user={currentUser}
+          <AppShell
+            userRole={currentUser?.role ?? "client"}
+            userProfile={currentUser ? loadProfile(currentUser.mobile) : null}
             onLogout={handleLogout}
-            onNavigate={(s) => setScreen(s)}
+            activeTab={activeShellTab}
+            onTabChange={setActiveShellTab}
           />
         )}
 
@@ -10661,6 +10868,16 @@ export default function App() {
               onLogout={handleLogout}
             />
           )}
+
+        {screen === "legal-feed" && currentUser && (
+          <LegalFeedScreen
+            currentUser={currentUser}
+            currentProfile={
+              currentUser ? loadProfile(currentUser.mobile) : null
+            }
+            onBack={() => setScreen("dashboard")}
+          />
+        )}
       </div>
     </div>
   );

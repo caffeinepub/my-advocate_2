@@ -1,48 +1,42 @@
 # My Advocate
 
 ## Current State
-The app has a full auth flow (splash, login, OTP, signup, profile setup), dashboards for advocates and clients, case management, document management, a messaging system, hearings list, and a hearing calendar. The Screen union and routing are all in a single App.tsx (~9600 lines). Data lives in localStorage. The existing `advocate-public-profile` screen lets a client view one advocate's profile after navigating from their own "My Profile" page (via the connected-advocate card).
+The app is a full-stack legal networking platform with the following working features:
+- Splash screen, Login (password + OTP), Forgot Password
+- Role selection (Advocate / Client), Registration forms with OTP verification
+- Profile setup (mandatory, with photo crop)
+- Dashboard (grid of icon cards — currently cleared/blank in v23)
+- My Profile, My Cases, Hearings, Calendar, My Clients, Messages/Chat, Find Advocates, Legal Feed pages
+- All data stored in localStorage (demo mode)
+- All existing pages are rendered via a `Screen` union type + conditional rendering in App.tsx
 
 ## Requested Changes (Diff)
 
 ### Add
-- New `Screen` values: `"find-advocates"` and `"advocate-discovery-profile"`
-- `SAMPLE_ADVOCATES` constant: 5 dummy advocate profiles pre-seeded into localStorage on first load (stored as `StoredProfile` + `AdvocateData` entries) so the directory is never empty
-- `FindAdvocatesPage` component:
-  - Accessible to both clients and advocates (advocates use it for networking)
-  - Search bar (text input, filters by name)
-  - Filter dropdowns: Practice Area, City (free text), Court (free text), Experience Range (0–5 yrs / 5–10 yrs / 10+ yrs)
-  - Advocate cards grid showing: profile photo/initials avatar, name, practice area badge, city, experience
-  - "Connected" badge on cards where the current client is already linked to that advocate
-  - Clicking a card navigates to `advocate-discovery-profile`
-  - Empty state when no results match
-- `AdvocateDiscoveryProfilePage` component (read-only, full profile):
-  - Cover photo / gradient, avatar straddling boundary
-  - Full name, practice area, court, experience, state/city, bio, bar council number
-  - If current user is a **client** and NOT yet connected → show two connect options:
-    - "Connect" button (auto-connects in demo mode: sets `linkedAdvocateId`)
-    - "Enter Referral Code" collapsible input
-  - If current user is a **client** and IS already connected → show "Connected" badge only (no connect buttons)
-  - If current user is an **advocate** → show a "Network" badge, no connect button
-  - Back button returns to `find-advocates`
-- "Find Advocates" card on **both** advocate and client dashboards (new card added to both `advocateCards` and `clientCards` arrays)
+- **Top Header** (persistent, shown after login): hamburger menu icon (left), My Advocate logo/wordmark (center), search icon + notification bell icon (right). Header replaces the old per-page headers inside dashboard screens.
+- **Bottom Navigation Bar** (persistent, shown after login): role-specific tabs.
+  - Advocate: Home | Cases | Clients | Messages | Profile
+  - Client: Home | Cases | Messages | Find Advocates | Profile
+  - Each tab has an icon + label, active tab highlighted in primary blue.
+- **Side Drawer** (slides in from left on hamburger tap, dark backdrop overlay): contains menu items: My Profile, Hearing Calendar, Documents, Case Statistics, Notifications, Settings, Help, Logout. Shows user avatar + name at top.
+- `AppShell` wrapper component that composes TopHeader + BottomNav + SideDrawer around child content. Only shown when user is logged in and has completed profile setup.
 
 ### Modify
-- `Screen` type union: add `"find-advocates"` and `"advocate-discovery-profile"`
-- `DashboardScreen`: add "Find Advocates" card to both `advocateCards` and `clientCards`
-- `App` root: add routing cases for `find-advocates` and `advocate-discovery-profile`
-- Add `selectedDiscoveryAdvocateId` state variable in App root
-- Seed sample advocate data on app first load (localStorage check)
+- The `dashboard` screen state becomes the entry point after login. It now renders the `AppShell` with the active tab content instead of a grid.
+- The `Screen` type is extended to include `"shell"` as the root authenticated state (or the `dashboard` screen transitions into the shell).
+- All existing page components remain unchanged for now — they will be wired into the new navigation in subsequent steps.
 
 ### Remove
-- Nothing removed
+- Old dashboard grid of icon cards (already removed in v23 — confirm it stays gone).
+- Per-page back-to-dashboard navigation headers inside individual screens are kept for now (will be migrated in later steps).
 
 ## Implementation Plan
-1. Add `"find-advocates"` and `"advocate-discovery-profile"` to the `Screen` type
-2. Define `SAMPLE_ADVOCATES` array (5 entries) and a `seedSampleAdvocates()` function that inserts them on first load (guarded by a localStorage key)
-3. Call `seedSampleAdvocates()` inside the App component on mount
-4. Build `FindAdvocatesPage`: search bar + 4 filter dropdowns, advocate card grid, Connected badge logic, empty state
-5. Build `AdvocateDiscoveryProfilePage`: full read-only profile, client connect button (auto-accept), referral code input, advocate networking view
-6. Add "Find Advocates" card to both dashboard card arrays
-7. Add `selectedDiscoveryAdvocateId` state + routing in App root for the two new screens
-8. Wire back-navigation: `find-advocates` → back to dashboard; `advocate-discovery-profile` → back to `find-advocates`
+1. Create `AppShell` component with:
+   - `TopHeader`: fixed top bar, 56px height, white bg, logo center, hamburger left, search + bell right
+   - `BottomNav`: fixed bottom bar, role-aware tabs with icons, active state in primary blue (#2563EB)
+   - `SideDrawer`: Sheet component sliding from left, user avatar + name at top, 8 menu items with icons
+2. Wrap the authenticated `dashboard` screen with `AppShell`
+3. Bottom nav tabs each render a placeholder content area (e.g. "Home", "Cases", etc.) — existing pages NOT yet wired
+4. Side drawer logout calls existing logout handler
+5. All interactive elements get `data-ocid` markers
+6. Validate and deploy
