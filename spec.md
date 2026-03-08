@@ -1,34 +1,113 @@
-# My Advocate
+# My Advocate – Case Management System
 
 ## Current State
 
-The app has four screens: splash, login (password + OTP tabs), role selection, and dashboard placeholder. All screens currently reference a single uploaded logo at `/assets/uploads/file_000000006f8c72088a0d3624c6aa5bf4-1.png` for every logo placement.
+The app has a complete auth, registration, profile setup, and dashboard system. Advocates have a "My Cases" screen and a "My Clients" screen. Clients have a "My Cases" screen. Both currently navigate to placeholder pages. All data is stored in localStorage with structured data models (users, profiles, advocate data, client data). Screens are managed via a `Screen` union type in App.tsx.
+
+Existing localStorage keys:
+- `myadvocate_users` – StoredUser[]
+- `myadvocate_profiles` – StoredProfile[]
+- `myadvocate_advocate_data` – AdvocateData[]
+- `myadvocate_client_data` – ClientData[] (has `linkedAdvocateId` = advocate's referral code)
+
+Existing constants: `PRACTICE_AREAS` array (9 options: Criminal Law, Civil Law, Family Law, Corporate Law, Property Law, Tax Law, Constitutional Law, Labour Law, Other).
 
 ## Requested Changes (Diff)
 
 ### Add
-- Three distinct logo assets staged in the project:
-  - `my-advocate-icon.png` → `/assets/uploads/file_0000000036f0720b93e8a32c87ff91e2-1.png`
-  - `my-advocate-header.png` → `/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png`
-  - `my-advocate-splash.png` → `/assets/uploads/file_000000003c74720b8f411065c41e45f4-3.png`
+
+**Case data model** (localStorage key: `myadvocate_cases`):
+```
+interface StoredCase {
+  id: string;                  // unique uuid
+  advocateId: string;          // advocate's mobile (userId)
+  clientId: string;            // client's mobile (userId)
+  caseTitle: string;
+  caseNumber: string;
+  courtName: string;
+  caseType: string;            // one of PRACTICE_AREAS
+  caseStatus: "Active" | "Pending" | "Adjourned" | "Closed" | "Disposed";
+  nextHearingDate: string;     // ISO date string (YYYY-MM-DD) or ""
+  notes: string;
+  createdAt: string;           // ISO timestamp
+}
+```
+
+**Case CRUD helpers** (localStorage-based):
+- `loadCases()`, `saveCases()`, `addCase()`, `updateCase()`, `deleteCase()`
+- `getCasesForAdvocateClient(advocateId, clientId)` – cases for a specific client under an advocate
+- `getCasesForClient(clientId)` – all cases where clientId matches (for client view, filtered to their connected advocate only)
+- `getUpcomingHearings(advocateId)` – all future hearing cases across all clients for an advocate, sorted by date
+
+**New Screen types** added to `Screen` union:
+- `"case-form"` – add/edit case modal/page (advocate only)
+- `"hearings"` – dedicated Hearings page (advocate only)
+
+**MyCasesPage** (advocate view):
+- When advocate opens "My Cases": show their clients list, each client showing a count of their cases
+- Clicking a client opens that client's case list within the advocate's context
+- Cases shown as cards with filter (Case Status, Hearing Date range, Court Name) and sort (Next Hearing Date, Recently Added)
+- Each case card shows: Case Title, Case Number, Court Name, Case Type badge, Case Status badge, Next Hearing Date, truncated Notes
+- Add Case button at top → opens Add Case form
+- Each card has Edit and Delete buttons (advocate only)
+- Status badge colors: Active=green, Pending=yellow, Adjourned=orange, Closed=gray, Disposed=red
+
+**MyCasesPage** (client view):
+- Shows all cases linked to the client via their connected advocate
+- Read-only cards (no Add/Edit/Delete buttons)
+- Same card design, filter, and sort as advocate view
+- If client has no connected advocate, show empty state: "Connect with an advocate to view your cases."
+
+**Client Profile Page extension** (advocate viewing a client):
+- Add "Cases" section at the bottom of the existing ClientProfilePage
+- Shows that client's cases list (advocate can add/edit/delete)
+- Same card style with Add Case button
+
+**Add/Edit Case Form** (Sheet or Dialog, advocate only):
+Fields:
+- Case Title (text, required)
+- Case Number (text, required)
+- Court Name (text, required)
+- Case Type (dropdown, PRACTICE_AREAS, required)
+- Case Status (dropdown: Active/Pending/Adjourned/Closed/Disposed, required)
+- Next Hearing Date (date input, optional)
+- Notes (textarea, optional)
+
+**Upcoming Hearings section on Dashboard**:
+- Advocate dashboard: add "Upcoming Hearings" section below the 4 cards
+- Shows next 3–5 upcoming hearings across all clients
+- Each hearing chip shows: client name, case title, court, date
+- Date highlights: "Today" (red/urgent), "Tomorrow" (orange), "Next 7 days" (blue), further = gray
+- "View All" link navigates to `"hearings"` screen
+
+**Hearings Page** (dedicated, advocate only):
+- Full list of all future hearings for all the advocate's clients
+- Grouped or sorted by date
+- Same highlight logic: Today, Tomorrow, Next 7 days, Beyond
+- Each card: client name, case title, court name, case number, date label
+- Back to Dashboard button in header
 
 ### Modify
-- **SplashScreen**: Replace old logo with `my-advocate-splash.png`. Remove any redundant "MY ADVOCATE" / tagline text below the logo since the splash image already contains the full brand identity. Keep white background, centered layout, fade animation.
-- **LoginScreen logo**: Replace with `my-advocate-icon.png` at ~60px height.
-- **OTP verify step**: Currently shows no standalone logo at top — no change needed (icon already visible via tab context). If a logo is shown, use `my-advocate-icon.png`.
-- **RoleSelectionScreen logo**: Replace with `my-advocate-icon.png` at ~60px height.
-- **DashboardScreen (placeholder header area)**: Add `my-advocate-header.png` as a clickable header logo in the top-left, linking/navigating to dashboard root. Height ~36px, constrained proportionally. (Since this is a placeholder screen it should show the header logo for consistency.)
-- All logo `img` elements must use `object-fit: contain`, no stretching, with appropriate `alt` text.
+
+- `MyCasesPage`: replace placeholder content with full case management UI
+- `ClientProfilePage`: add Cases section at bottom
+- `DashboardScreen` (advocate view): add Upcoming Hearings section below navigation cards
+- `Screen` type union: add `"case-form"` and `"hearings"`
+- App root: wire `"hearings"` screen to new HearingsPage component
 
 ### Remove
-- All references to the old single logo path `file_000000006f8c72088a0d3624c6aa5bf4-1.png`.
+
+- Placeholder text in MyCasesPage ("Your case management system will appear here")
 
 ## Implementation Plan
 
-1. In `App.tsx`:
-   - Update `SplashScreen` to use splash logo path; remove redundant text below if image already contains branding.
-   - Update `LoginScreen` logo `<img>` src to icon path, set height to 60px.
-   - Update `RoleSelectionScreen` logo `<img>` src to icon path, set height to 60px.
-   - Add a header bar to `DashboardScreen` with `my-advocate-header.png` in the top-left (height ~36px, clickable, navigates to dashboard).
-   - Ensure no logo is stretched; all use `object-fit: contain`.
-2. Validate frontend build.
+1. Add `StoredCase` interface and all CRUD helpers to App.tsx
+2. Add `"hearings"` to the Screen union type
+3. Replace `MyCasesPage` with full advocate case management (client selector → case list with filters/sort → add/edit/delete via Sheet form)
+4. Replace `MyCasesPage` client view with read-only filtered case list
+5. Add Cases section to `ClientProfilePage` (advocate view of a client)
+6. Add `AddEditCaseSheet` component (Sheet-based form, advocate only)
+7. Add Upcoming Hearings section to `DashboardScreen` (advocate only), showing 3–5 next hearings
+8. Build `HearingsPage` with full future hearing list, date grouping and highlight logic
+9. Wire `"hearings"` screen in App root
+10. Apply all `data-ocid` deterministic markers to new interactive surfaces
