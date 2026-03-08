@@ -2,53 +2,35 @@
 
 ## Current State
 
-The app has a full AppShell with a side drawer (hamburger menu). The side drawer currently handles only two items functionally:
-- "My Profile" → switches to the `profile` tab
-- "Notifications" → switches to the `notifications` tab
-
-All other items (Hearing Calendar, Documents, Case Statistics, Settings, Help) show a "Coming soon" toast. The drawer icons are plain gray with no color differentiation. There is no "View Profile" quick-link in the drawer header. Settings and Help pages do not exist.
-
-All major tab pages already exist as React components:
-- `CasesTab` (handles My Cases + Hearings + Calendar sub-tabs)
-- `CalendarSubTab` + `CalendarPage`
-- `CasesTab` contains `CaseStatisticsSection` (donut chart + bar chart + stat cards)
-- `NotificationsTab`
-- `ProfileTab`
-- `MessagesTab`
-- `MyClientsTab`
-
-Documents are stored per-case via `getDocumentsForCase()` and loaded from `loadDocuments()`.
+The Advocate Verification system has a `VerificationStatus` type (`"not_verified" | "pending" | "verified"`) stored per-user in localStorage via `loadVerificationStatus` / `saveVerificationStatus`. The profile page (`ProfileTab`) shows the verification UI section. The verified state currently shows a green `CheckCircle2` icon with the text "Verified Advocate" inside the verification card only — it does not appear next to the advocate name elsewhere on the platform.
 
 ## Requested Changes (Diff)
 
 ### Add
-- **SettingsTab** component: full settings page with sections for Update Profile Photo, Update Cover Photo, Change Email, Change Mobile Number, Change Password, and Notification Preferences toggle
-- **HelpTab** component: help page with FAQ accordion, Contact Support form, Report a Problem form, and About My Advocate section
-- **"View Profile" link** in the drawer header (below user name/badge)
-- **All-Documents view**: a `DrawerDocumentsTab` component that aggregates all documents across all cases (filtered by role), with filter by document type and case, and view/download actions
+- A reusable `VerifiedBadge` inline component: a blue `BadgeCheck` (or `CheckCircle2`) icon with a "Verified Advocate" label in blue, shown inline next to an advocate's name when their verification status is `"verified"`.
+- A helper function `getAdvocateVerificationStatus(mobile: string): VerificationStatus` that reads from localStorage — to be used in components that render other advocates' names (feed posts, find advocates, chat header).
+- The `VerifiedBadge` displayed next to the advocate's name in:
+  1. **Advocate profile page** (`ProfileTab`) — next to the `<h1>` displaying `displayName`
+  2. **Legal Feed posts** — next to `{post.authorName}` in both `LegalFeedTab` and `LegalFeedScreen`
+  3. **Find Advocates directory** — next to `{profile.fullName}` in both `FindAdvocatesTab` and `FindAdvocatesPage`
+  4. **Messages chat header** — next to `{partnerName}` in `ChatScreen`
 
 ### Modify
-- **AppShell SideDrawer**: replace plain gray icons with colored icon containers (soft background circles per item), add "View Profile" button in header, wire all menu items to `onDrawerAction` callback instead of showing "Coming soon"
-- **App.tsx drawer handler**: map drawer actions to the correct `activeShellTab` values or new drawer-specific tabs: `calendar`, `documents`, `statistics`, `settings`, `help`
-- **activeShellTab type/routing**: add support for new pseudo-tabs: `"drawer-calendar"`, `"drawer-documents"`, `"drawer-statistics"`, `"settings"`, `"help"` so they render inside the AppShell content area
+- `LegalFeedTab` and `LegalFeedScreen`: posts need to store or look up the author's mobile to check their verification status. Since posts currently only store `authorName` (no `authorMobile`), we should add `authorMobile?: string` to the `UserPost` interface and populate it when creating posts. For demo posts (`DemoPost`), no badge is shown (no mobile available). For user posts, use the stored `authorMobile` to look up verification status.
+- `ChatScreen`: look up the partner's verification status using `partnerUserId` (which is their mobile).
+- `FindAdvocatesTab` and `FindAdvocatesPage`: use `advData.userId` to look up verification status.
+- `ProfileTab`: use `user.mobile` (the current user's mobile) to look up their own verification status for badge display.
 
 ### Remove
-- `toast.info("Coming soon")` calls for all drawer items except those not yet planned
+- Nothing removed.
 
 ## Implementation Plan
 
-1. **AppShell.tsx**
-   - Add `onDrawerAction: (action: string) => void` prop to `AppShell` and pass it down to `SideDrawer`
-   - In `SideDrawer`, replace `handleMenuItemClick` to call `onDrawerAction(itemId)` for all items instead of showing "Coming soon"
-   - Redesign each drawer menu item row: wrap the icon in a 36×36 rounded soft-background container with per-item color (User=blue, Calendar=green, FileText=orange, BarChart2=purple, Bell=blue, Settings=slate, HelpCircle=teal)
-   - Add a "View Profile →" text button in the drawer profile header below the name/badge
-
-2. **App.tsx**
-   - Add new shell tab IDs: `"drawer-calendar"` | `"drawer-documents"` | `"drawer-statistics"` | `"settings"` | `"help"`
-   - In the `handleDrawerAction` function (new), map action strings to `setActiveShellTab(...)` calls
-   - Add render blocks for new tabs inside the AppShell children block
-   - Build `SettingsTab` component inline: sections for photo update (reuses existing crop flow), email/mobile/password change forms with validation, and notification preferences toggle
-   - Build `HelpTab` component inline: FAQ accordion (5-6 items), contact support form (name/email/message), report a problem form, and about section
-   - Build `DrawerDocumentsTab` component: loads all documents via `loadDocuments()`, filters by `advocateId` or `clientId` per role, shows cards with title/type/date/case-name, filter by docType and case, view/download buttons
-
-3. No backend changes needed. All data is already in localStorage.
+1. Add `authorMobile?: string` to the `UserPost` interface.
+2. Populate `authorMobile: user.mobile` (or `currentUser.mobile`) when creating new posts in `LegalFeedTab.handleSubmitPost` and `LegalFeedScreen.handleSubmitPost`.
+3. Create a small inline `VerifiedBadge` component (blue `BadgeCheck` icon + "Verified Advocate" text, compact, inline-flex).
+4. In `ProfileTab`: after the `<h1>{displayName}</h1>`, conditionally render `<VerifiedBadge />` when `verificationStatus === "verified"` and `isAdvocate`.
+5. In `LegalFeedTab` and `LegalFeedScreen`: for each post, if it is a `UserPost` and has `authorMobile`, call `loadVerificationStatus(authorMobile)` and show `<VerifiedBadge />` next to `{post.authorName}`.
+6. In `FindAdvocatesTab`: next to `{profile.fullName}`, call `loadVerificationStatus(advData.userId)` and show `<VerifiedBadge />` if `"verified"`.
+7. In `FindAdvocatesPage`: same as above.
+8. In `ChatScreen`: if the partner is an advocate (check via `loadAllAdvocateData()`), call `loadVerificationStatus(partnerUserId)` and show `<VerifiedBadge />` next to `{partnerName}` in the chat header.

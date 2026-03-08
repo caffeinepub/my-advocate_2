@@ -52,6 +52,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Archive,
   ArrowLeft,
+  BadgeCheck,
   BarChart2,
   Bell,
   Briefcase,
@@ -70,6 +71,7 @@ import {
   Eye,
   EyeOff,
   File,
+  FileCheck,
   FileText,
   Filter,
   HelpCircle,
@@ -90,8 +92,10 @@ import {
   Send,
   Settings,
   Share2,
+  ShieldCheck,
   ThumbsUp,
   Trash2,
+  Upload,
   UploadCloud,
   User,
   UserCheck,
@@ -376,6 +380,42 @@ function generateReferralCode(): string {
   return code;
 }
 
+// ─── Advocate Verification ─────────────────────────────────────────────────────
+const LS_VERIFICATION_KEY = "myadvocate_verification";
+type VerificationStatus = "not_verified" | "pending" | "verified";
+
+function loadVerificationStatus(mobile: string): VerificationStatus {
+  try {
+    const data = JSON.parse(localStorage.getItem(LS_VERIFICATION_KEY) || "{}");
+    return (data[mobile] as VerificationStatus) || "not_verified";
+  } catch {
+    return "not_verified";
+  }
+}
+
+function saveVerificationStatus(
+  mobile: string,
+  status: VerificationStatus,
+): void {
+  try {
+    const data = JSON.parse(localStorage.getItem(LS_VERIFICATION_KEY) || "{}");
+    data[mobile] = status;
+    localStorage.setItem(LS_VERIFICATION_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
+}
+
+// ─── Verified Advocate Badge ───────────────────────────────────────────────────
+function VerifiedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full whitespace-nowrap">
+      <BadgeCheck className="w-3.5 h-3.5 shrink-0" />
+      Verified Advocate
+    </span>
+  );
+}
+
 // ─── Sample Advocate Seeding ───────────────────────────────────────────────────
 const LS_SEEDED_KEY = "myadvocate_seeded_v1";
 
@@ -550,6 +590,7 @@ interface UserPost {
   authorInitials: string;
   authorAvatarColor: string;
   authorPhoto?: string;
+  authorMobile?: string;
   practiceArea: string;
   text: string;
   imageDataUrl?: string;
@@ -9013,9 +9054,15 @@ function ChatScreen({
 
         {/* Partner info */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-foreground truncate">
-            {partnerName}
-          </p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-sm font-bold text-foreground truncate">
+              {partnerName}
+            </p>
+            {loadAllAdvocateData().some((a) => a.userId === partnerUserId) &&
+              loadVerificationStatus(partnerUserId) === "verified" && (
+                <VerifiedBadge />
+              )}
+          </div>
           <p className="text-xs text-green-500 font-medium">Online</p>
         </div>
 
@@ -12952,9 +12999,13 @@ function FindAdvocatesPage({
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-bold text-foreground truncate">
-                        {profile.fullName}
-                      </p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-bold text-foreground">
+                          {profile.fullName}
+                        </p>
+                        {loadVerificationStatus(advData.userId) ===
+                          "verified" && <VerifiedBadge />}
+                      </div>
                       {connected && (
                         <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
                           <CheckCircle2 className="w-3 h-3" />
@@ -14203,6 +14254,7 @@ function LegalFeedTab({
       authorInitials,
       authorAvatarColor,
       authorPhoto: currentProfile?.profilePhoto || undefined,
+      authorMobile: currentUser.mobile,
       practiceArea:
         (currentProfile as { practiceArea?: string } | null)?.practiceArea ||
         "Advocate",
@@ -14439,9 +14491,16 @@ function LegalFeedTab({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-foreground leading-tight">
-                        {post.authorName}
-                      </p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-bold text-foreground leading-tight">
+                          {post.authorName}
+                        </p>
+                        {isUserPost &&
+                          (post as UserPost).authorMobile &&
+                          loadVerificationStatus(
+                            (post as UserPost).authorMobile!,
+                          ) === "verified" && <VerifiedBadge />}
+                      </div>
                       <span className="inline-flex items-center text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full mt-0.5">
                         {post.practiceArea}
                       </span>
@@ -14821,6 +14880,7 @@ function LegalFeedScreen({
       authorInitials,
       authorAvatarColor,
       authorPhoto: currentProfile?.profilePhoto || undefined,
+      authorMobile: currentUser.mobile,
       practiceArea:
         (currentProfile as { practiceArea?: string } | null)?.practiceArea ||
         "Advocate",
@@ -15053,9 +15113,16 @@ function LegalFeedScreen({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-foreground leading-tight">
-                          {post.authorName}
-                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-bold text-foreground leading-tight">
+                            {post.authorName}
+                          </p>
+                          {isUserPost &&
+                            (post as UserPost).authorMobile &&
+                            loadVerificationStatus(
+                              (post as UserPost).authorMobile!,
+                            ) === "verified" && <VerifiedBadge />}
+                        </div>
                         <span className="inline-flex items-center text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full mt-0.5">
                           {post.practiceArea}
                         </span>
@@ -15241,6 +15308,43 @@ function ProfileTab({ user }: { user: StoredUser }) {
   const connectedAdvocate = clientData?.linkedAdvocateId
     ? findAdvocateByCode(clientData.linkedAdvocateId)
     : null;
+
+  // Verification status (advocate only)
+  const [verificationStatus, setVerificationStatus] =
+    useState<VerificationStatus>(() => loadVerificationStatus(user.mobile));
+  const [showVerificationForm, setShowVerificationForm] = useState(false);
+  const [verifEnrollmentNumber, setVerifEnrollmentNumber] = useState("");
+  const [verifStateBarCouncil, setVerifStateBarCouncil] = useState("");
+  const [verifEnrollmentCert, setVerifEnrollmentCert] = useState<File | null>(
+    null,
+  );
+  const [verifIdCard, setVerifIdCard] = useState<File | null>(null);
+  const verifEnrollmentCertRef = useRef<HTMLInputElement>(null);
+  const verifIdCardRef = useRef<HTMLInputElement>(null);
+
+  function handleStartVerification() {
+    setShowVerificationForm(true);
+  }
+
+  function handleSubmitVerification() {
+    if (
+      !verifEnrollmentNumber.trim() ||
+      !verifStateBarCouncil.trim() ||
+      !verifEnrollmentCert ||
+      !verifIdCard
+    ) {
+      toast.error("Please fill in all fields and upload both documents.");
+      return;
+    }
+    saveVerificationStatus(user.mobile, "pending");
+    setVerificationStatus("pending");
+    setShowVerificationForm(false);
+    setVerifEnrollmentNumber("");
+    setVerifStateBarCouncil("");
+    setVerifEnrollmentCert(null);
+    setVerifIdCard(null);
+    toast.success("Verification submitted successfully");
+  }
 
   // Stats
   const allCases = useMemo(() => loadCases(), []);
@@ -15465,9 +15569,14 @@ function ProfileTab({ user }: { user: StoredUser }) {
           </div>
 
           {/* Name */}
-          <h1 className="mt-3 text-xl font-bold text-foreground tracking-tight text-center">
-            {displayName}
-          </h1>
+          <div className="mt-3 flex flex-col items-center gap-1.5">
+            <h1 className="text-xl font-bold text-foreground tracking-tight text-center">
+              {displayName}
+            </h1>
+            {isAdvocate && verificationStatus === "verified" && (
+              <VerifiedBadge />
+            )}
+          </div>
 
           {/* Practice area badge (advocate only) */}
           {isAdvocate && profile?.practiceArea && (
@@ -15759,6 +15868,308 @@ function ProfileTab({ user }: { user: StoredUser }) {
             <p className="text-xs text-muted-foreground mt-2">
               Share this code with your clients so they can connect with you.
             </p>
+          </div>
+        )}
+
+        {/* Advocate Verification (advocate only) */}
+        {isAdvocate && (
+          <div
+            data-ocid="profile_tab.verification.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            {/* Section header */}
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4 text-primary" />
+              </div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Advocate Verification
+              </p>
+            </div>
+
+            <div className="px-4 py-4">
+              {verificationStatus === "not_verified" && (
+                <div className="flex flex-col gap-3">
+                  {!showVerificationForm ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-gray-400 shrink-0" />
+                        <p className="text-sm text-muted-foreground">
+                          Status:{" "}
+                          <span className="font-semibold text-foreground">
+                            Not Verified
+                          </span>
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Verify your Bar Council enrollment to display a verified
+                        badge and build client trust.
+                      </p>
+                      <button
+                        type="button"
+                        data-ocid="profile_tab.verification.primary_button"
+                        onClick={handleStartVerification}
+                        className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring mt-1"
+                      >
+                        <ShieldCheck className="w-4 h-4" />
+                        Start Verification
+                      </button>
+                    </>
+                  ) : (
+                    <div
+                      data-ocid="profile_tab.verification.form"
+                      className="flex flex-col gap-4"
+                    >
+                      {/* Form intro */}
+                      <div className="flex items-center gap-2 pb-1 border-b border-border">
+                        <span className="w-2.5 h-2.5 rounded-full bg-gray-400 shrink-0" />
+                        <p className="text-sm text-muted-foreground">
+                          Status:{" "}
+                          <span className="font-semibold text-foreground">
+                            Not Verified
+                          </span>
+                        </p>
+                      </div>
+
+                      {/* Bar Council Enrollment Number */}
+                      <div className="flex flex-col gap-1.5">
+                        <label
+                          htmlFor="verif-enrollment-number"
+                          className="text-xs font-semibold text-foreground"
+                        >
+                          Bar Council Enrollment Number{" "}
+                          <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="verif-enrollment-number"
+                          type="text"
+                          data-ocid="profile_tab.verification.enrollment_number.input"
+                          value={verifEnrollmentNumber}
+                          onChange={(e) =>
+                            setVerifEnrollmentNumber(e.target.value)
+                          }
+                          placeholder="e.g. MH/1234/2018"
+                          className="w-full border border-border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
+                        />
+                      </div>
+
+                      {/* State Bar Council */}
+                      <div className="flex flex-col gap-1.5">
+                        <label
+                          htmlFor="verif-state-bar-council"
+                          className="text-xs font-semibold text-foreground"
+                        >
+                          State Bar Council{" "}
+                          <span className="text-destructive">*</span>
+                        </label>
+                        <select
+                          id="verif-state-bar-council"
+                          data-ocid="profile_tab.verification.state_bar_council.input"
+                          value={verifStateBarCouncil}
+                          onChange={(e) =>
+                            setVerifStateBarCouncil(e.target.value)
+                          }
+                          className="w-full border border-border rounded-xl px-3 py-2.5 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-colors appearance-none"
+                        >
+                          <option value="">Select State Bar Council</option>
+                          <option value="Bar Council of Maharashtra">
+                            Bar Council of Maharashtra
+                          </option>
+                          <option value="Bar Council of Delhi">
+                            Bar Council of Delhi
+                          </option>
+                          <option value="Bar Council of Karnataka">
+                            Bar Council of Karnataka
+                          </option>
+                          <option value="Bar Council of Tamil Nadu">
+                            Bar Council of Tamil Nadu
+                          </option>
+                          <option value="Bar Council of Uttar Pradesh">
+                            Bar Council of Uttar Pradesh
+                          </option>
+                          <option value="Bar Council of Gujarat">
+                            Bar Council of Gujarat
+                          </option>
+                          <option value="Bar Council of Rajasthan">
+                            Bar Council of Rajasthan
+                          </option>
+                          <option value="Bar Council of West Bengal">
+                            Bar Council of West Bengal
+                          </option>
+                          <option value="Bar Council of Telangana">
+                            Bar Council of Telangana
+                          </option>
+                          <option value="Bar Council of Kerala">
+                            Bar Council of Kerala
+                          </option>
+                          <option value="Bar Council of Punjab & Haryana">
+                            Bar Council of Punjab &amp; Haryana
+                          </option>
+                          <option value="Bar Council of Madhya Pradesh">
+                            Bar Council of Madhya Pradesh
+                          </option>
+                          <option value="Bar Council of Andhra Pradesh">
+                            Bar Council of Andhra Pradesh
+                          </option>
+                          <option value="Bar Council of Bihar">
+                            Bar Council of Bihar
+                          </option>
+                          <option value="Bar Council of Odisha">
+                            Bar Council of Odisha
+                          </option>
+                        </select>
+                      </div>
+
+                      {/* Upload Enrollment Certificate */}
+                      <div className="flex flex-col gap-1.5">
+                        <label
+                          htmlFor="verif-enrollment-cert"
+                          className="text-xs font-semibold text-foreground"
+                        >
+                          Upload Enrollment Certificate{" "}
+                          <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="verif-enrollment-cert"
+                          ref={verifEnrollmentCertRef}
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            setVerifEnrollmentCert(file);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          data-ocid="profile_tab.verification.enrollment_cert.upload_button"
+                          onClick={() =>
+                            verifEnrollmentCertRef.current?.click()
+                          }
+                          className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl px-4 py-3 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Upload className="w-4 h-4 shrink-0" />
+                          {verifEnrollmentCert
+                            ? "Change File"
+                            : "Choose PDF or Image"}
+                        </button>
+                        {verifEnrollmentCert && (
+                          <p className="text-xs text-primary font-medium truncate flex items-center gap-1">
+                            <FileCheck className="w-3.5 h-3.5 shrink-0" />
+                            {verifEnrollmentCert.name}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Upload Advocate ID Card */}
+                      <div className="flex flex-col gap-1.5">
+                        <label
+                          htmlFor="verif-id-card"
+                          className="text-xs font-semibold text-foreground"
+                        >
+                          Upload Advocate ID Card{" "}
+                          <span className="text-destructive">*</span>
+                        </label>
+                        <input
+                          id="verif-id-card"
+                          ref={verifIdCardRef}
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] ?? null;
+                            setVerifIdCard(file);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          data-ocid="profile_tab.verification.id_card.upload_button"
+                          onClick={() => verifIdCardRef.current?.click()}
+                          className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-xl px-4 py-3 text-sm text-muted-foreground hover:border-primary hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Upload className="w-4 h-4 shrink-0" />
+                          {verifIdCard ? "Change File" : "Choose PDF or Image"}
+                        </button>
+                        {verifIdCard && (
+                          <p className="text-xs text-primary font-medium truncate flex items-center gap-1">
+                            <FileCheck className="w-3.5 h-3.5 shrink-0" />
+                            {verifIdCard.name}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-col gap-2 pt-1">
+                        <button
+                          type="button"
+                          data-ocid="profile_tab.verification.submit_button"
+                          onClick={handleSubmitVerification}
+                          className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          Submit Verification
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid="profile_tab.verification.cancel_button"
+                          onClick={() => {
+                            setShowVerificationForm(false);
+                            setVerifEnrollmentNumber("");
+                            setVerifStateBarCouncil("");
+                            setVerifEnrollmentCert(null);
+                            setVerifIdCard(null);
+                          }}
+                          className="w-full text-sm font-medium text-muted-foreground hover:text-foreground transition-colors py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {verificationStatus === "pending" && (
+                <div
+                  data-ocid="profile_tab.verification.loading_state"
+                  className="flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                    <p className="text-sm text-amber-700 font-medium">
+                      Status:{" "}
+                      <span className="font-semibold">
+                        Verification Pending
+                      </span>
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Your verification is under review. We will notify you once
+                    it is approved.
+                  </p>
+                </div>
+              )}
+
+              {verificationStatus === "verified" && (
+                <div
+                  data-ocid="profile_tab.verification.success_state"
+                  className="flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" />
+                    <p className="text-sm text-green-700 font-medium flex items-center gap-1.5">
+                      Status:{" "}
+                      <span className="font-semibold">Verified Advocate</span>
+                      <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Your Bar Council enrollment has been verified. A verified
+                    badge is displayed on your profile.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -16597,10 +17008,14 @@ function FindAdvocatesTab({ user }: { user: StoredUser }) {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-bold text-foreground truncate">
-                        {profile.fullName}
-                      </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-bold text-foreground">
+                          {profile.fullName}
+                        </p>
+                        {loadVerificationStatus(advData.userId) ===
+                          "verified" && <VerifiedBadge />}
+                      </div>
                       {connected && (
                         <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
                           Connected
