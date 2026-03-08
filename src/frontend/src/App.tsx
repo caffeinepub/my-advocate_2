@@ -11,6 +11,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -35,6 +40,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Archive,
   ArrowLeft,
   Briefcase,
   Building2,
@@ -58,6 +64,7 @@ import {
   Lock,
   Mail,
   MessageCircle,
+  Network,
   Newspaper,
   Paperclip,
   Pencil,
@@ -71,12 +78,26 @@ import {
   Trash2,
   UploadCloud,
   User,
+  UserCheck,
+  UserPlus,
+  UserX,
   Users,
+  Video,
   X,
   ZoomIn,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 // react-easy-crop replaced with custom canvas cropper below
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { toast } from "sonner";
 
 type Screen =
@@ -929,6 +950,7 @@ interface StoredMessage {
   };
   timestamp: string; // ISO
   seen: boolean; // true once recipient has opened the conversation
+  delivered?: boolean; // true after ~1.5 s delivery simulation
 }
 
 const LS_MESSAGES_KEY = "myadvocate_messages";
@@ -994,18 +1016,16 @@ function getUnreadCount(conversationId: string, readerMobile: string): number {
   ).length;
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: retained for upcoming navigation rebuild
 function getTotalUnreadCount(
   myMobile: string,
   myRole: "advocate" | "client",
 ): number {
   const all = loadAllMessages();
   if (myRole === "advocate") {
-    // Advocate: sum unread across all conversations where they are participant
+    // Advocate: sum unread across all client conversations
     const advData = loadAllAdvocateData().find((a) => a.userId === myMobile);
-    if (!advData) return 0;
-    const clients = getClientsForAdvocate(advData.referralCode);
-    return clients.reduce((sum, c) => {
+    const clients = advData ? getClientsForAdvocate(advData.referralCode) : [];
+    const clientUnread = clients.reduce((sum, c) => {
       const convId = getConversationId(myMobile, c.userId);
       return (
         sum +
@@ -1015,6 +1035,19 @@ function getTotalUnreadCount(
         ).length
       );
     }, 0);
+    // Also sum unread from advocate network connections
+    const networkIds = getConnectedAdvocateIds(myMobile);
+    const networkUnread = networkIds.reduce((sum, otherId) => {
+      const convId = getConversationId(myMobile, otherId);
+      return (
+        sum +
+        all.filter(
+          (m) =>
+            m.conversationId === convId && m.senderId !== myMobile && !m.seen,
+        ).length
+      );
+    }, 0);
+    return clientUnread + networkUnread;
   }
   // Client: one conversation with their advocate
   const clientData = loadAllClientData().find((c) => c.userId === myMobile);
@@ -1037,6 +1070,476 @@ function generateMsgId(): string {
 
 function generateChatFileId(): string {
   return `chatfile_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── Notification Data ────────────────────────────────────────────────────────
+
+type NotificationType =
+  | "new_message"
+  | "case_update"
+  | "hearing_reminder"
+  | "document_uploaded"
+  | "post_like"
+  | "post_comment"
+  | "new_client"
+  | "connection_request";
+
+interface StoredNotification {
+  id: string;
+  userId: string; // recipient mobile
+  type: NotificationType;
+  title: string;
+  body: string;
+  avatarInitials: string;
+  avatarColor: string;
+  avatarPhoto?: string;
+  relatedTab?: string; // which tab to navigate to on click
+  timestamp: string; // ISO
+  read: boolean;
+}
+
+const LS_NOTIFICATIONS_KEY = "myadvocate_notifications";
+const LS_NOTIF_SEEDED_KEY = "myadvocate_notif_seeded_v1";
+
+function loadNotifications(userId: string): StoredNotification[] {
+  try {
+    const all: StoredNotification[] = JSON.parse(
+      localStorage.getItem(LS_NOTIFICATIONS_KEY) || "[]",
+    );
+    return all
+      .filter((n) => n.userId === userId)
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function saveNotification(notif: StoredNotification): void {
+  try {
+    const all: StoredNotification[] = JSON.parse(
+      localStorage.getItem(LS_NOTIFICATIONS_KEY) || "[]",
+    );
+    all.push(notif);
+    localStorage.setItem(LS_NOTIFICATIONS_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+function markAllNotificationsRead(userId: string): void {
+  try {
+    const all: StoredNotification[] = JSON.parse(
+      localStorage.getItem(LS_NOTIFICATIONS_KEY) || "[]",
+    );
+    const updated = all.map((n) =>
+      n.userId === userId ? { ...n, read: true } : n,
+    );
+    localStorage.setItem(LS_NOTIFICATIONS_KEY, JSON.stringify(updated));
+  } catch {
+    /* ignore */
+  }
+}
+
+function getNotificationUnreadCount(userId: string): number {
+  return loadNotifications(userId).filter((n) => !n.read).length;
+}
+
+function generateNotifId(): string {
+  return `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function seedDemoNotifications(
+  userId: string,
+  role: "advocate" | "client",
+): void {
+  if (localStorage.getItem(`${LS_NOTIF_SEEDED_KEY}_${userId}`)) return;
+  const now = Date.now();
+  const notifications: StoredNotification[] =
+    role === "advocate"
+      ? [
+          {
+            id: generateNotifId(),
+            userId,
+            type: "new_client",
+            title: "New Client Connected",
+            body: "Rajesh Kumar connected with you using your referral code ADV-DEMO1.",
+            avatarInitials: "RK",
+            avatarColor: "bg-emerald-600",
+            relatedTab: "clients",
+            timestamp: new Date(now - 5 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "new_message",
+            title: "New Message",
+            body: 'Sunita Patel sent you a message: "When is the next hearing scheduled?"',
+            avatarInitials: "SP",
+            avatarColor: "bg-rose-600",
+            relatedTab: "messages",
+            timestamp: new Date(now - 25 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "post_like",
+            title: "Post Liked",
+            body: "Priya Nair and 4 others liked your post on Criminal Law bail jurisprudence.",
+            avatarInitials: "PN",
+            avatarColor: "bg-violet-600",
+            relatedTab: "home",
+            timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "post_comment",
+            title: "New Comment",
+            body: 'Vikram Desai commented on your post: "Excellent analysis of the bail provisions."',
+            avatarInitials: "VD",
+            avatarColor: "bg-teal-600",
+            relatedTab: "home",
+            timestamp: new Date(now - 4 * 60 * 60 * 1000).toISOString(),
+            read: true,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "document_uploaded",
+            title: "Document Uploaded",
+            body: "A petition document has been added to Case No. HC/2025/1145 for client Mohan Lal.",
+            avatarInitials: "ML",
+            avatarColor: "bg-amber-600",
+            relatedTab: "cases",
+            timestamp: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+            read: true,
+          },
+        ]
+      : [
+          {
+            id: generateNotifId(),
+            userId,
+            type: "hearing_reminder",
+            title: "Hearing Reminder",
+            body: "Your case HC/2025/1145 has a hearing scheduled for tomorrow at Delhi High Court.",
+            avatarInitials: "AS",
+            avatarColor: "bg-blue-600",
+            relatedTab: "cases",
+            timestamp: new Date(now - 10 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "new_message",
+            title: "New Message from Advocate",
+            body: 'Arjun Sharma sent you a message: "Your documents have been filed successfully."',
+            avatarInitials: "AS",
+            avatarColor: "bg-blue-600",
+            relatedTab: "messages",
+            timestamp: new Date(now - 30 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "case_update",
+            title: "Case Update",
+            body: "Case No. HC/2025/1145 status has been updated to Active by your advocate.",
+            avatarInitials: "AS",
+            avatarColor: "bg-blue-600",
+            relatedTab: "cases",
+            timestamp: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+            read: false,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "document_uploaded",
+            title: "Document Uploaded",
+            body: "Your advocate Arjun Sharma uploaded an Affidavit for Case No. HC/2025/1145.",
+            avatarInitials: "AS",
+            avatarColor: "bg-blue-600",
+            relatedTab: "cases",
+            timestamp: new Date(now - 5 * 60 * 60 * 1000).toISOString(),
+            read: true,
+          },
+          {
+            id: generateNotifId(),
+            userId,
+            type: "connection_request",
+            title: "Connected with Advocate",
+            body: "You are now connected with Arjun Sharma (Criminal Law). You can now chat and view your cases.",
+            avatarInitials: "AS",
+            avatarColor: "bg-blue-600",
+            relatedTab: "profile",
+            timestamp: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+            read: true,
+          },
+        ];
+  for (const n of notifications) saveNotification(n);
+  localStorage.setItem(`${LS_NOTIF_SEEDED_KEY}_${userId}`, "1");
+}
+
+// ─── Advocate Network Connections ────────────────────────────────────────────
+
+const LS_CONNECTIONS_KEY = "myadvocate_connections";
+
+interface AdvocateConnection {
+  id: string;
+  fromAdvocateId: string; // mobile of requester
+  toAdvocateId: string; // mobile of recipient
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string; // ISO
+}
+
+function generateConnectionId(): string {
+  return `conn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function loadConnections(): AdvocateConnection[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_CONNECTIONS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveConnectionsToStorage(connections: AdvocateConnection[]): void {
+  localStorage.setItem(LS_CONNECTIONS_KEY, JSON.stringify(connections));
+}
+
+function sendConnectionRequest(fromId: string, toId: string): void {
+  const all = loadConnections();
+  // Avoid duplicates
+  const existing = all.find(
+    (c) =>
+      (c.fromAdvocateId === fromId && c.toAdvocateId === toId) ||
+      (c.fromAdvocateId === toId && c.toAdvocateId === fromId),
+  );
+  if (existing) return;
+  const conn: AdvocateConnection = {
+    id: generateConnectionId(),
+    fromAdvocateId: fromId,
+    toAdvocateId: toId,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+  all.push(conn);
+  saveConnectionsToStorage(all);
+
+  // Create notification for recipient
+  const fromProfile = loadProfile(fromId);
+  const fromName = fromProfile?.fullName || "An advocate";
+  const fromInitials = fromName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  saveNotification({
+    id: generateNotifId(),
+    userId: toId,
+    type: "connection_request",
+    title: "Connection Request",
+    body: `${fromName} sent you a connection request.`,
+    avatarInitials: fromInitials,
+    avatarColor: getAvatarColorFromNameStatic(fromName),
+    relatedTab: "network",
+    timestamp: new Date().toISOString(),
+    read: false,
+  });
+}
+
+function getAvatarColorFromNameStatic(name: string): string {
+  const colors = [
+    "bg-blue-600",
+    "bg-rose-600",
+    "bg-emerald-600",
+    "bg-violet-600",
+    "bg-amber-600",
+    "bg-sky-600",
+    "bg-pink-600",
+    "bg-teal-600",
+    "bg-indigo-600",
+    "bg-orange-600",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function getConnectionStatus(
+  myId: string,
+  otherId: string,
+): "none" | "pending_sent" | "pending_received" | "connected" | "rejected" {
+  const all = loadConnections();
+  const conn = all.find(
+    (c) =>
+      (c.fromAdvocateId === myId && c.toAdvocateId === otherId) ||
+      (c.fromAdvocateId === otherId && c.toAdvocateId === myId),
+  );
+  if (!conn) return "none";
+  if (conn.status === "accepted") return "connected";
+  if (conn.status === "rejected") return "rejected";
+  // pending
+  if (conn.fromAdvocateId === myId) return "pending_sent";
+  return "pending_received";
+}
+
+function acceptConnection(connectionId: string, myMobile: string): void {
+  const all = loadConnections();
+  const idx = all.findIndex((c) => c.id === connectionId);
+  if (idx === -1) return;
+  all[idx] = { ...all[idx], status: "accepted" };
+  saveConnectionsToStorage(all);
+
+  // Notify the requester
+  const conn = all[idx];
+  const accepterProfile = loadProfile(myMobile);
+  const accepterName = accepterProfile?.fullName || "An advocate";
+  const accepterInitials = accepterName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  saveNotification({
+    id: generateNotifId(),
+    userId: conn.fromAdvocateId,
+    type: "connection_request",
+    title: "Connection Accepted",
+    body: `${accepterName} accepted your connection request.`,
+    avatarInitials: accepterInitials,
+    avatarColor: getAvatarColorFromNameStatic(accepterName),
+    relatedTab: "network",
+    timestamp: new Date().toISOString(),
+    read: false,
+  });
+}
+
+function rejectConnection(connectionId: string): void {
+  const all = loadConnections();
+  const idx = all.findIndex((c) => c.id === connectionId);
+  if (idx === -1) return;
+  all[idx] = { ...all[idx], status: "rejected" };
+  saveConnectionsToStorage(all);
+}
+
+function cancelConnectionRequest(connectionId: string): void {
+  saveConnectionsToStorage(
+    loadConnections().filter((c) => c.id !== connectionId),
+  );
+}
+
+function getMyNetworkConnections(myId: string): AdvocateConnection[] {
+  return loadConnections().filter(
+    (c) =>
+      c.status === "accepted" &&
+      (c.fromAdvocateId === myId || c.toAdvocateId === myId),
+  );
+}
+
+function getPendingIncoming(myId: string): AdvocateConnection[] {
+  return loadConnections().filter(
+    (c) => c.status === "pending" && c.toAdvocateId === myId,
+  );
+}
+
+function getPendingOutgoing(myId: string): AdvocateConnection[] {
+  return loadConnections().filter(
+    (c) => c.status === "pending" && c.fromAdvocateId === myId,
+  );
+}
+
+function getConnectedAdvocateIds(myId: string): string[] {
+  return getMyNetworkConnections(myId).map((c) =>
+    c.fromAdvocateId === myId ? c.toAdvocateId : c.fromAdvocateId,
+  );
+}
+
+function getPendingNetworkCount(myId: string): number {
+  return getPendingIncoming(myId).length;
+}
+
+function getSuggestedAdvocates(myId: string): StoredProfile[] {
+  const allAdvocates = loadAllAdvocateData();
+  const connectedIds = new Set(getConnectedAdvocateIds(myId));
+  const pendingIds = new Set([
+    ...getPendingIncoming(myId).map((c) => c.fromAdvocateId),
+    ...getPendingOutgoing(myId).map((c) => c.toAdvocateId),
+  ]);
+  const myProfile = loadProfile(myId);
+
+  const candidates = allAdvocates
+    .filter(
+      (a) =>
+        a.userId !== myId &&
+        !connectedIds.has(a.userId) &&
+        !pendingIds.has(a.userId),
+    )
+    .map((a) => loadProfile(a.userId))
+    .filter((p): p is StoredProfile => p !== null);
+
+  // Score suggestions: same city=3, same practiceArea=2, same state=1
+  function score(p: StoredProfile): number {
+    let s = 0;
+    if (myProfile) {
+      if (
+        p.city &&
+        myProfile.city &&
+        p.city.toLowerCase() === myProfile.city.toLowerCase()
+      )
+        s += 3;
+      if (
+        p.practiceArea &&
+        myProfile.practiceArea &&
+        p.practiceArea === myProfile.practiceArea
+      )
+        s += 2;
+      if (p.state && myProfile.state && p.state === myProfile.state) s += 1;
+    }
+    return s;
+  }
+
+  return candidates.sort((a, b) => score(b) - score(a)).slice(0, 10);
+}
+
+function getMatchTags(
+  myProfile: StoredProfile | null,
+  other: StoredProfile,
+): string[] {
+  if (!myProfile) return [];
+  const tags: string[] = [];
+  if (
+    other.city &&
+    myProfile.city &&
+    other.city.toLowerCase() === myProfile.city.toLowerCase()
+  )
+    tags.push("Same city");
+  if (
+    other.practiceArea &&
+    myProfile.practiceArea &&
+    other.practiceArea === myProfile.practiceArea
+  )
+    tags.push("Same practice area");
+  if (other.state && myProfile.state && other.state === myProfile.state)
+    tags.push("Same state");
+  if (
+    other.courtName &&
+    myProfile.courtName &&
+    other.courtName === myProfile.courtName
+  )
+    tags.push("Same court");
+  return tags;
 }
 
 function formatMsgTime(isoStr: string): string {
@@ -5800,6 +6303,1687 @@ function CaseCard({
   );
 }
 
+// ─── Cases Tab (bottom-nav embedded, no own header) ──────────────────────────
+
+type CasesSubTab = "my-cases" | "hearings" | "calendar";
+
+function CasesTabCaseCard({
+  c,
+  index,
+  isAdvocate,
+  clientName,
+  currentUserMobile,
+  advocateId,
+  onRefresh,
+}: {
+  c: StoredCase;
+  index: number;
+  isAdvocate: boolean;
+  clientName?: string;
+  currentUserMobile: string;
+  advocateId: string;
+  onRefresh: () => void;
+}) {
+  const statusColor = getCaseStatusColor(c.caseStatus);
+  const hearingInfo = c.nextHearingDate
+    ? getHearingLabel(c.nextHearingDate)
+    : null;
+
+  // Sheet states
+  const [viewSheetOpen, setViewSheetOpen] = useState(false);
+  const [docSheetOpen, setDocSheetOpen] = useState(false);
+  const [hearingSheetOpen, setHearingSheetOpen] = useState(false);
+  const [newHearingDate, setNewHearingDate] = useState(c.nextHearingDate || "");
+  const [savingHearing, setSavingHearing] = useState(false);
+
+  function handleSaveHearing() {
+    setSavingHearing(true);
+    setTimeout(() => {
+      updateCaseInStorage({ ...c, nextHearingDate: newHearingDate });
+      setSavingHearing(false);
+      setHearingSheetOpen(false);
+      toast.success("Hearing date updated");
+      onRefresh();
+    }, 300);
+  }
+
+  const advocateName =
+    loadProfile(advocateId)?.fullName ||
+    loadAllAdvocateData().find((a) => a.userId === advocateId)?.name ||
+    "Advocate";
+
+  return (
+    <div
+      data-ocid={`cases_tab.case_card.item.${index}`}
+      className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+    >
+      {/* Card body */}
+      <div className="p-4 flex flex-col gap-2.5">
+        {/* Case number */}
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-[11px] font-mono font-semibold text-muted-foreground tracking-wide">
+            {c.caseNumber}
+          </span>
+          {/* Status badge */}
+          <span
+            className={`shrink-0 inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusColor}`}
+          >
+            {c.caseStatus}
+          </span>
+        </div>
+
+        {/* Client name (advocate view) */}
+        {isAdvocate && clientName && (
+          <p className="text-sm font-bold text-foreground leading-snug -mt-1">
+            {clientName}
+          </p>
+        )}
+
+        {/* Case title */}
+        <p className="text-sm font-semibold text-foreground leading-snug">
+          {c.caseTitle}
+        </p>
+
+        {/* Court */}
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Building2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">{c.courtName}</span>
+        </div>
+
+        {/* Case type pill */}
+        <div className="flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-primary bg-primary/8 px-2 py-0.5 rounded-full">
+            <Scale className="w-3 h-3" />
+            {c.caseType}
+          </span>
+        </div>
+
+        {/* Next hearing date */}
+        {hearingInfo ? (
+          <div className="flex items-center gap-1.5">
+            <CalendarDays className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+            <span
+              className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${hearingInfo.color}`}
+            >
+              {hearingInfo.label}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {new Date(`${c.nextHearingDate}T00:00:00`).toLocaleDateString(
+                "en-IN",
+                {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                },
+              )}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CalendarDays className="w-3.5 h-3.5 shrink-0" />
+            <span>No hearing date set</span>
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="border-t border-border flex items-stretch divide-x divide-border">
+        {/* View Case */}
+        <button
+          data-ocid={`cases_tab.case_view_button.${index}`}
+          type="button"
+          onClick={() => setViewSheetOpen(true)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-primary hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          View Case
+        </button>
+
+        {isAdvocate && (
+          <>
+            {/* Add Document */}
+            <button
+              data-ocid={`cases_tab.case_add_document_button.${index}`}
+              type="button"
+              onClick={() => setDocSheetOpen(true)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Add Doc
+            </button>
+
+            {/* Update Hearing */}
+            <button
+              data-ocid={`cases_tab.case_update_hearing_button.${index}`}
+              type="button"
+              onClick={() => {
+                setNewHearingDate(c.nextHearingDate || "");
+                setHearingSheetOpen(true);
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            >
+              <CalendarDays className="w-3.5 h-3.5" />
+              Hearing
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* View Case Sheet */}
+      <Sheet open={viewSheetOpen} onOpenChange={setViewSheetOpen}>
+        <SheetContent
+          data-ocid="cases_tab.view_case.sheet"
+          side="bottom"
+          className="rounded-t-2xl max-h-[85vh] flex flex-col p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
+            <div className="flex items-start justify-between gap-2">
+              <SheetTitle className="text-sm font-bold text-foreground leading-snug">
+                {c.caseTitle}
+              </SheetTitle>
+              <button
+                data-ocid="cases_tab.view_case.close_button"
+                type="button"
+                onClick={() => setViewSheetOpen(false)}
+                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-[11px] font-mono text-muted-foreground text-left">
+              {c.caseNumber}
+            </p>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <CaseDocumentsSection
+              caseId={c.id}
+              advocateId={c.advocateId}
+              clientId={c.clientId}
+              currentUserMobile={currentUserMobile}
+              role={isAdvocate ? "advocate" : "client"}
+              advocateName={advocateName}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Add Document Sheet (advocate only) */}
+      {isAdvocate && (
+        <Sheet open={docSheetOpen} onOpenChange={setDocSheetOpen}>
+          <SheetContent
+            data-ocid="cases_tab.add_doc.sheet"
+            side="bottom"
+            className="rounded-t-2xl max-h-[85vh] flex flex-col p-0"
+          >
+            <SheetHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
+              <div className="flex items-start justify-between gap-2">
+                <SheetTitle className="text-sm font-bold text-foreground leading-snug">
+                  Documents – {c.caseNumber}
+                </SheetTitle>
+                <button
+                  data-ocid="cases_tab.add_doc.close_button"
+                  type="button"
+                  onClick={() => setDocSheetOpen(false)}
+                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {/* biome-ignore lint/a11y/useValidAriaRole: role is a component prop, not ARIA */}
+              <CaseDocumentsSection
+                caseId={c.id}
+                advocateId={c.advocateId}
+                clientId={c.clientId}
+                currentUserMobile={currentUserMobile}
+                role="advocate"
+                advocateName={advocateName}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* Update Hearing Sheet (advocate only) */}
+      {isAdvocate && (
+        <Sheet open={hearingSheetOpen} onOpenChange={setHearingSheetOpen}>
+          <SheetContent
+            data-ocid="cases_tab.update_hearing.sheet"
+            side="bottom"
+            className="rounded-t-2xl p-0"
+          >
+            <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
+              <div className="flex items-start justify-between gap-2">
+                <SheetTitle className="text-sm font-bold text-foreground leading-snug">
+                  Update Hearing Date
+                </SheetTitle>
+                <button
+                  data-ocid="cases_tab.update_hearing.close_button"
+                  type="button"
+                  onClick={() => setHearingSheetOpen(false)}
+                  className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground text-left">
+                {c.caseTitle} · {c.caseNumber}
+              </p>
+            </SheetHeader>
+            <div className="px-5 py-5 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label
+                  htmlFor={`hearing-date-${c.id}`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  Next Hearing Date
+                </label>
+                <input
+                  id={`hearing-date-${c.id}`}
+                  data-ocid="cases_tab.hearing_date.input"
+                  type="date"
+                  value={newHearingDate}
+                  onChange={(e) => setNewHearingDate(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  data-ocid="cases_tab.update_hearing.cancel_button"
+                  type="button"
+                  onClick={() => setHearingSheetOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Cancel
+                </button>
+                <button
+                  data-ocid="cases_tab.update_hearing.save_button"
+                  type="button"
+                  onClick={handleSaveHearing}
+                  disabled={savingHearing}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                >
+                  {savingHearing ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+// ── CaseStatisticsSection ───────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, string> = {
+  Active: "#22c55e",
+  Pending: "#f59e0b",
+  Closed: "#6b7280",
+  Adjourned: "#f97316",
+  Disposed: "#ef4444",
+};
+
+function CaseStatisticsSection({
+  allCases,
+}: {
+  allCases: Array<StoredCase & { resolvedClientName: string }>;
+}) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const totalCases = allCases.length;
+  const activeCases = allCases.filter((c) => c.caseStatus === "Active").length;
+  const closedCases = allCases.filter((c) => c.caseStatus === "Closed").length;
+  const upcomingHearings = allCases.filter((c) => {
+    if (!c.nextHearingDate) return false;
+    const d = new Date(c.nextHearingDate);
+    d.setHours(0, 0, 0, 0);
+    return d >= today;
+  }).length;
+
+  // Donut chart data
+  const donutData = CASE_STATUSES.map((status) => ({
+    name: status,
+    value: allCases.filter((c) => c.caseStatus === status).length,
+    color: STATUS_COLORS[status],
+  })).filter((d) => d.value > 0);
+
+  const hasAnyCases = totalCases > 0;
+
+  // Hearing timeline — 6 months: 3 prior + current + 2 next
+  const timelineMonths = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(today.getFullYear(), today.getMonth() - 3 + i, 1);
+    return d;
+  });
+
+  const timelineData = timelineMonths.map((monthStart) => {
+    const monthEnd = new Date(
+      monthStart.getFullYear(),
+      monthStart.getMonth() + 1,
+      0,
+    );
+    const count = allCases.filter((c) => {
+      if (!c.nextHearingDate) return false;
+      const hd = new Date(c.nextHearingDate);
+      return hd >= monthStart && hd <= monthEnd;
+    }).length;
+    const shortName = monthStart.toLocaleString("en-IN", { month: "short" });
+    const label =
+      monthStart.getFullYear() !== today.getFullYear()
+        ? `${shortName} '${String(monthStart.getFullYear()).slice(2)}`
+        : shortName;
+    return { month: label, hearings: count };
+  });
+
+  const donutChartConfig = Object.fromEntries(
+    CASE_STATUSES.map((s) => [s, { label: s, color: STATUS_COLORS[s] }]),
+  );
+
+  const barChartConfig = {
+    hearings: { label: "Hearings", color: "#2563EB" },
+  };
+
+  return (
+    <div data-ocid="cases_tab.stats.section" className="flex flex-col gap-4">
+      {/* 4 stat cards in 2×2 grid */}
+      <div className="grid grid-cols-2 gap-3">
+        <div
+          data-ocid="cases_tab.stats.total_cases.card"
+          className="bg-white rounded-2xl shadow-sm border border-border p-4 flex flex-col gap-1"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              Total Cases
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
+              <Briefcase className="w-4 h-4 text-blue-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{totalCases}</p>
+          <p className="text-[10px] text-muted-foreground">
+            All clients combined
+          </p>
+        </div>
+
+        <div
+          data-ocid="cases_tab.stats.active_cases.card"
+          className="bg-white rounded-2xl shadow-sm border border-border p-4 flex flex-col gap-1"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              Active Cases
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-green-50 flex items-center justify-center">
+              <CheckCircle2 className="w-4 h-4 text-green-600" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-green-600">{activeCases}</p>
+          <p className="text-[10px] text-muted-foreground">Currently ongoing</p>
+        </div>
+
+        <div
+          data-ocid="cases_tab.stats.closed_cases.card"
+          className="bg-white rounded-2xl shadow-sm border border-border p-4 flex flex-col gap-1"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              Closed Cases
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center">
+              <Archive className="w-4 h-4 text-gray-500" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-gray-500">{closedCases}</p>
+          <p className="text-[10px] text-muted-foreground">
+            Resolved &amp; disposed
+          </p>
+        </div>
+
+        <div
+          data-ocid="cases_tab.stats.upcoming_hearings.card"
+          className="bg-white rounded-2xl shadow-sm border border-border p-4 flex flex-col gap-1"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">
+              Upcoming Hearings
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center">
+              <CalendarDays className="w-4 h-4 text-orange-500" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold text-orange-500">
+            {upcomingHearings}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            From today onwards
+          </p>
+        </div>
+      </div>
+
+      {/* Donut chart — Case Status distribution */}
+      <div
+        data-ocid="cases_tab.stats.donut_chart.card"
+        className="bg-white rounded-2xl shadow-sm border border-border p-4"
+      >
+        <p className="text-sm font-semibold text-foreground mb-3">
+          Case Status Distribution
+        </p>
+        {hasAnyCases ? (
+          <ChartContainer
+            config={donutChartConfig}
+            className="h-[200px] w-full"
+          >
+            <PieChart>
+              <Pie
+                data={donutData}
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={80}
+                paddingAngle={2}
+                dataKey="value"
+              >
+                {donutData.map((entry) => (
+                  <Cell key={`cell-${entry.name}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                formatter={(value) => (
+                  <span className="text-xs text-muted-foreground">{value}</span>
+                )}
+              />
+            </PieChart>
+          </ChartContainer>
+        ) : (
+          <div className="h-[180px] flex flex-col items-center justify-center text-center">
+            <Scale className="w-10 h-10 text-muted-foreground/20 mb-2" />
+            <p className="text-xs text-muted-foreground max-w-[200px] leading-relaxed">
+              No cases yet. Add cases to see analytics.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Bar chart — Hearing Timeline */}
+      <div
+        data-ocid="cases_tab.stats.timeline_chart.card"
+        className="bg-white rounded-2xl shadow-sm border border-border p-4"
+      >
+        <p className="text-sm font-semibold text-foreground mb-3">
+          Hearing Timeline
+        </p>
+        <ChartContainer config={barChartConfig} className="h-[200px] w-full">
+          <BarChart data={timelineData} barSize={20}>
+            <XAxis
+              dataKey="month"
+              tick={{ fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              allowDecimals={false}
+              width={28}
+            />
+            <ChartTooltip content={<ChartTooltipContent />} />
+            <Bar dataKey="hearings" fill="#2563EB" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ChartContainer>
+      </div>
+    </div>
+  );
+}
+
+// ── MyCasesSubTab ──────────────────────────────────────────────────────────────
+
+function MyCasesSubTab({ user }: { user: StoredUser | null }) {
+  const isAdvocate = user?.role === "advocate";
+
+  const advocateData = isAdvocate
+    ? (loadAllAdvocateData().find((a) => a.userId === user?.mobile) ?? null)
+    : null;
+  const referralCode = advocateData?.referralCode ?? null;
+  const allClients = referralCode ? getClientsForAdvocate(referralCode) : [];
+
+  const clientData = !isAdvocate
+    ? (loadAllClientData().find((c) => c.userId === user?.mobile) ?? null)
+    : null;
+  const connectedAdvocate = clientData?.linkedAdvocateId
+    ? findAdvocateByCode(clientData.linkedAdvocateId)
+    : null;
+
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("hearing");
+  const [_caseListVersion, setCaseListVersion] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCaseType, setFilterCaseType] = useState("all");
+  const [filterCourt, setFilterCourt] = useState("all");
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+
+  // Add case sheet state
+  const [addCaseOpen, setAddCaseOpen] = useState(false);
+  const [addCaseClientId, setAddCaseClientId] = useState<string>("");
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+
+  // Re-evaluated when caseListVersion bumps
+  // caseListVersion bumps cause re-render, so these derived values are re-computed
+  const allCases: Array<StoredCase & { resolvedClientName: string }> =
+    isAdvocate && user
+      ? allClients.flatMap((client) => {
+          const cases = getCasesForAdvocateClient(user.mobile, client.userId);
+          const clientProfile = loadProfile(client.userId);
+          const resolvedClientName =
+            clientProfile?.fullName || client.name || "Client";
+          return cases.map((c) => ({ ...c, resolvedClientName }));
+        })
+      : [];
+
+  const clientCases: StoredCase[] =
+    !isAdvocate && user && connectedAdvocate
+      ? getCasesForAdvocateClient(connectedAdvocate.userId, user.mobile)
+      : [];
+
+  const allCourtNames = useMemo(() => {
+    const allC = isAdvocate ? allCases : clientCases;
+    return Array.from(
+      new Set(allC.map((c) => c.courtName).filter(Boolean)),
+    ).sort() as string[];
+  }, [allCases, clientCases, isAdvocate]);
+
+  const activeFilterCount = [
+    filterStatus !== "all",
+    filterCaseType !== "all",
+    filterCourt !== "all",
+  ].filter(Boolean).length;
+
+  const advocateCasesFiltered = allCases
+    .filter((c) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (q) {
+        const matchesCaseNumber = c.caseNumber.toLowerCase().includes(q);
+        const matchesCourtName = c.courtName.toLowerCase().includes(q);
+        const matchesClientName = c.resolvedClientName
+          ?.toLowerCase()
+          .includes(q);
+        const matchesTitle = c.caseTitle?.toLowerCase().includes(q);
+        if (
+          !matchesCaseNumber &&
+          !matchesCourtName &&
+          !matchesClientName &&
+          !matchesTitle
+        )
+          return false;
+      }
+      if (filterStatus !== "all" && c.caseStatus !== filterStatus) return false;
+      if (filterCaseType !== "all" && c.caseType !== filterCaseType)
+        return false;
+      if (filterCourt !== "all" && c.courtName !== filterCourt) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "hearing") {
+        if (!a.nextHearingDate && !b.nextHearingDate) return 0;
+        if (!a.nextHearingDate) return 1;
+        if (!b.nextHearingDate) return -1;
+        return (
+          new Date(a.nextHearingDate).getTime() -
+          new Date(b.nextHearingDate).getTime()
+        );
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  const clientCasesFiltered = clientCases
+    .filter((c) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (q) {
+        const matchesCaseNumber = c.caseNumber.toLowerCase().includes(q);
+        const matchesCourtName = c.courtName.toLowerCase().includes(q);
+        const matchesTitle = c.caseTitle?.toLowerCase().includes(q);
+        if (!matchesCaseNumber && !matchesCourtName && !matchesTitle)
+          return false;
+      }
+      if (filterStatus !== "all" && c.caseStatus !== filterStatus) return false;
+      if (filterCaseType !== "all" && c.caseType !== filterCaseType)
+        return false;
+      if (filterCourt !== "all" && c.courtName !== filterCourt) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "hearing") {
+        if (!a.nextHearingDate && !b.nextHearingDate) return 0;
+        if (!a.nextHearingDate) return 1;
+        if (!b.nextHearingDate) return -1;
+        return (
+          new Date(a.nextHearingDate).getTime() -
+          new Date(b.nextHearingDate).getTime()
+        );
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+  function handleAddCase() {
+    if (!user || !isAdvocate) return;
+    if (allClients.length === 0) {
+      toast.error(
+        "No clients connected. Share your referral code to connect clients.",
+      );
+      return;
+    }
+    if (allClients.length === 1) {
+      setAddCaseClientId(allClients[0].userId);
+      setAddCaseOpen(true);
+    } else {
+      setClientPickerOpen(true);
+    }
+  }
+
+  function handleRefresh() {
+    setCaseListVersion((v) => v + 1);
+  }
+
+  const currentUserMobile = user?.mobile ?? "";
+  const currentAdvocateId = isAdvocate
+    ? (user?.mobile ?? "")
+    : (connectedAdvocate?.userId ?? "");
+
+  return (
+    <div data-ocid="cases_tab.my_cases.section" className="flex flex-col gap-4">
+      {/* Header row: title + add button */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h2 className="text-base font-bold text-foreground">My Cases</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isAdvocate
+              ? `${advocateCasesFiltered.length} case${advocateCasesFiltered.length !== 1 ? "s" : ""}`
+              : `${clientCasesFiltered.length} case${clientCasesFiltered.length !== 1 ? "s" : ""}`}
+          </p>
+        </div>
+        {isAdvocate && (
+          <button
+            data-ocid="cases_tab.add_case.button"
+            type="button"
+            onClick={handleAddCase}
+            className="flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-2 rounded-xl hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Case
+          </button>
+        )}
+      </div>
+
+      {/* ── Advocate-only stats + analytics section ─────────────────── */}
+      {isAdvocate && <CaseStatisticsSection allCases={allCases} />}
+
+      {/* Search bar */}
+      <div className="relative flex items-center">
+        <Search className="absolute left-3 w-4 h-4 text-muted-foreground pointer-events-none" />
+        <Input
+          data-ocid="cases_tab.search.input"
+          type="search"
+          placeholder="Search by client, case no., or court…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-9 pr-9 h-10 text-sm rounded-xl border-border"
+        />
+        {searchQuery && (
+          <button
+            data-ocid="cases_tab.search.clear_button"
+            type="button"
+            onClick={() => setSearchQuery("")}
+            className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Clear search"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Filter button + Sort row */}
+      <div className="flex items-center gap-2">
+        <button
+          data-ocid="cases_tab.filter.open_modal_button"
+          type="button"
+          onClick={() => setFilterSheetOpen(true)}
+          className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-medium text-foreground hover:bg-muted/50 transition-colors relative"
+        >
+          <Filter className="w-3.5 h-3.5" />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+        <div className="flex-1">
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger
+              data-ocid="cases_tab.sort.select"
+              className="h-9 text-xs rounded-xl border-border"
+            >
+              <SelectValue placeholder="Sort" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hearing">Next Hearing</SelectItem>
+              <SelectItem value="recent">Recently Added</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Cases list */}
+      {isAdvocate ? (
+        advocateCasesFiltered.length === 0 ? (
+          <div
+            data-ocid="cases_tab.my_cases.empty_state"
+            className="flex flex-col items-center justify-center text-center py-12"
+          >
+            <Scale className="w-14 h-14 text-muted-foreground/20 mb-4" />
+            <p className="text-sm font-semibold text-foreground">
+              {allClients.length === 0 ? "No cases yet" : "No matching cases"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-2 max-w-[240px] leading-relaxed">
+              {allClients.length === 0
+                ? "Connect clients using your referral code and add cases."
+                : "Try changing the filters above."}
+            </p>
+          </div>
+        ) : (
+          <div
+            data-ocid="cases_tab.my_cases.list"
+            className="flex flex-col gap-3"
+          >
+            {advocateCasesFiltered.map((c, idx) => (
+              <CasesTabCaseCard
+                key={c.id}
+                c={c}
+                index={idx + 1}
+                isAdvocate
+                clientName={c.resolvedClientName}
+                currentUserMobile={currentUserMobile}
+                advocateId={currentAdvocateId}
+                onRefresh={handleRefresh}
+              />
+            ))}
+          </div>
+        )
+      ) : !connectedAdvocate ? (
+        <div
+          data-ocid="cases_tab.my_cases.empty_state"
+          className="flex flex-col items-center justify-center text-center py-12"
+        >
+          <Scale className="w-14 h-14 text-muted-foreground/20 mb-4" />
+          <p className="text-sm font-semibold text-foreground">
+            No advocate connected
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 max-w-[240px] leading-relaxed">
+            Connect with an advocate to view your cases.
+          </p>
+        </div>
+      ) : clientCasesFiltered.length === 0 ? (
+        <div
+          data-ocid="cases_tab.my_cases.empty_state"
+          className="flex flex-col items-center justify-center text-center py-12"
+        >
+          <Scale className="w-14 h-14 text-muted-foreground/20 mb-4" />
+          <p className="text-sm font-semibold text-foreground">
+            No cases assigned yet
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 max-w-[240px] leading-relaxed">
+            Your advocate will add cases to your profile soon.
+          </p>
+        </div>
+      ) : (
+        <div
+          data-ocid="cases_tab.my_cases.list"
+          className="flex flex-col gap-3"
+        >
+          {clientCasesFiltered.map((c, idx) => (
+            <CasesTabCaseCard
+              key={c.id}
+              c={c}
+              index={idx + 1}
+              isAdvocate={false}
+              currentUserMobile={currentUserMobile}
+              advocateId={currentAdvocateId}
+              onRefresh={handleRefresh}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Filter Sheet */}
+      <Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
+        <SheetContent
+          data-ocid="cases_tab.filter.sheet"
+          side="bottom"
+          className="rounded-t-2xl p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <div className="flex items-center justify-between">
+              <SheetTitle className="text-sm font-bold">
+                Filter Cases
+              </SheetTitle>
+              <button
+                data-ocid="cases_tab.filter.close_button"
+                type="button"
+                onClick={() => setFilterSheetOpen(false)}
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </SheetHeader>
+
+          <div className="px-5 py-4 flex flex-col gap-4">
+            {/* Case Status */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 block">
+                Case Status
+              </Label>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger
+                  data-ocid="cases_tab.filter.status.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Pending">Pending</SelectItem>
+                  <SelectItem value="Closed">Closed</SelectItem>
+                  <SelectItem value="Adjourned">Adjourned</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Case Type */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 block">
+                Case Type
+              </Label>
+              <Select value={filterCaseType} onValueChange={setFilterCaseType}>
+                <SelectTrigger
+                  data-ocid="cases_tab.filter.case_type.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="Civil Law">Civil</SelectItem>
+                  <SelectItem value="Criminal Law">Criminal</SelectItem>
+                  <SelectItem value="Family Law">Family</SelectItem>
+                  <SelectItem value="Corporate Law">Corporate</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Court */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 block">
+                Court
+              </Label>
+              <Select value={filterCourt} onValueChange={setFilterCourt}>
+                <SelectTrigger
+                  data-ocid="cases_tab.filter.court.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="All Courts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Courts</SelectItem>
+                  {allCourtNames.map((court) => (
+                    <SelectItem key={court} value={court}>
+                      {court}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 pt-1">
+              {activeFilterCount > 0 && (
+                <Button
+                  data-ocid="cases_tab.filter.clear_button"
+                  type="button"
+                  variant="outline"
+                  className="flex-1 h-10 text-sm rounded-xl"
+                  onClick={() => {
+                    setFilterStatus("all");
+                    setFilterCaseType("all");
+                    setFilterCourt("all");
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              )}
+              <Button
+                data-ocid="cases_tab.filter.apply_button"
+                type="button"
+                className="flex-1 h-10 text-sm rounded-xl bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={() => setFilterSheetOpen(false)}
+              >
+                Apply Filters
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Client Picker Sheet */}
+      <Sheet open={clientPickerOpen} onOpenChange={setClientPickerOpen}>
+        <SheetContent
+          data-ocid="cases_tab.client_picker.sheet"
+          side="bottom"
+          className="rounded-t-2xl p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border">
+            <div className="flex items-start justify-between gap-2">
+              <SheetTitle className="text-sm font-bold text-foreground">
+                Select Client
+              </SheetTitle>
+              <button
+                data-ocid="cases_tab.client_picker.close_button"
+                type="button"
+                onClick={() => setClientPickerOpen(false)}
+                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </SheetHeader>
+          <div className="px-5 py-4 flex flex-col gap-2 max-h-72 overflow-y-auto">
+            {allClients.map((client) => {
+              const clientProfile = loadProfile(client.userId);
+              const name = clientProfile?.fullName || client.name || "Client";
+              const initials = name
+                .split(" ")
+                .map((w: string) => w[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+              return (
+                <button
+                  key={client.userId}
+                  data-ocid="cases_tab.client_picker.item"
+                  type="button"
+                  onClick={() => {
+                    setAddCaseClientId(client.userId);
+                    setClientPickerOpen(false);
+                    setAddCaseOpen(true);
+                  }}
+                  className="flex items-center gap-3 p-3 rounded-xl border border-border hover:bg-muted/40 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring w-full"
+                >
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    {clientProfile?.profilePhoto ? (
+                      <img
+                        src={clientProfile.profilePhoto}
+                        alt={name}
+                        className="w-9 h-9 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-primary">
+                        {initials}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {name}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {[clientProfile?.city, clientProfile?.state]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Add Case Sheet */}
+      {isAdvocate && user && addCaseClientId && (
+        <AddEditCaseSheet
+          open={addCaseOpen}
+          onClose={() => {
+            setAddCaseOpen(false);
+            setAddCaseClientId("");
+          }}
+          advocateId={user.mobile}
+          clientId={addCaseClientId}
+          onSaved={handleRefresh}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── HearingsSubTab ─────────────────────────────────────────────────────────────
+
+function HearingsSubTab({ user }: { user: StoredUser | null }) {
+  const isAdvocate = user?.role === "advocate";
+  const upcoming = user ? getAllUpcomingHearings(user.mobile, user.role) : [];
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const nextWeek = new Date(today);
+  nextWeek.setDate(nextWeek.getDate() + 7);
+
+  const groups: { label: string; items: StoredCase[] }[] = [
+    {
+      label: "Today",
+      items: upcoming.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === today.getTime();
+      }),
+    },
+    {
+      label: "Tomorrow",
+      items: upcoming.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === tomorrow.getTime();
+      }),
+    },
+    {
+      label: "Next 7 Days",
+      items: upcoming.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > tomorrow && d <= nextWeek;
+      }),
+    },
+    {
+      label: "Later",
+      items: upcoming.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > nextWeek;
+      }),
+    },
+  ];
+
+  return (
+    <div data-ocid="cases_tab.hearings.section" className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-base font-bold text-foreground">
+          Upcoming Hearings
+        </h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {upcoming.length} hearing{upcoming.length !== 1 ? "s" : ""} scheduled
+        </p>
+      </div>
+
+      {upcoming.length === 0 ? (
+        <div
+          data-ocid="cases_tab.hearings.empty_state"
+          className="flex flex-col items-center justify-center text-center py-12"
+        >
+          <CalendarDays className="w-14 h-14 text-muted-foreground/20 mb-4" />
+          <p className="text-sm font-semibold text-foreground">
+            No upcoming hearings
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 max-w-[240px] leading-relaxed">
+            Hearings will appear here as you add cases with hearing dates.
+          </p>
+        </div>
+      ) : (
+        <div
+          data-ocid="cases_tab.hearings.list"
+          className="flex flex-col gap-6"
+        >
+          {groups.map((group) => {
+            if (group.items.length === 0) return null;
+            return (
+              <div key={group.label}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    {group.label}
+                  </span>
+                  <span className="text-[10px] font-semibold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
+                    {group.items.length}
+                  </span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="flex flex-col gap-3">
+                  {group.items.map((c, idx) => {
+                    const clientData = loadAllClientData().find(
+                      (cd) => cd.userId === c.clientId,
+                    );
+                    const clientProfile = loadProfile(c.clientId);
+                    const clientName =
+                      clientProfile?.fullName || clientData?.name || "Client";
+                    const hearingInfo = getHearingLabel(c.nextHearingDate);
+                    return (
+                      <div
+                        key={c.id}
+                        data-ocid={`cases_tab.hearings.item.${idx + 1}`}
+                        className="bg-white rounded-xl border border-border shadow-sm p-3 flex flex-col gap-1.5"
+                      >
+                        {isAdvocate && (
+                          <p className="text-[10px] font-medium text-muted-foreground">
+                            Client: {clientName}
+                          </p>
+                        )}
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-bold text-foreground leading-snug flex-1 min-w-0 truncate">
+                            {c.caseTitle}
+                          </p>
+                          <span
+                            className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+                          >
+                            {c.caseStatus}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Building2 className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{c.courtName}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {c.caseNumber}
+                        </span>
+                        <span
+                          className={`self-start inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${hearingInfo.color}`}
+                        >
+                          <Calendar className="w-2.5 h-2.5" />
+                          {hearingInfo.label} ·{" "}
+                          {new Date(
+                            `${c.nextHearingDate}T00:00:00`,
+                          ).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CalendarSubTab ─────────────────────────────────────────────────────────────
+
+function CalendarSubTab({ user }: { user: StoredUser | null }) {
+  const role = user?.role ?? "client";
+  const userId = user?.mobile ?? "";
+
+  const [currentMonth, setCurrentMonth] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const upcomingHearings = user ? getAllUpcomingHearings(userId, role) : [];
+
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const tomorrowDate = new Date(todayDate);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const nextWeekDate = new Date(todayDate);
+  nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+
+  const upcomingGroups: { label: string; items: StoredCase[] }[] = [
+    {
+      label: "Today",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === todayDate.getTime();
+      }),
+    },
+    {
+      label: "Tomorrow",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === tomorrowDate.getTime();
+      }),
+    },
+    {
+      label: "Next 7 Days",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > tomorrowDate && d <= nextWeekDate;
+      }),
+    },
+    {
+      label: "Later",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > nextWeekDate;
+      }),
+    },
+  ];
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDayOfMonth; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  function toDateStr(day: number): string {
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function handleDateClick(day: number) {
+    const dateStr = toDateStr(day);
+    const hearingsOnDay = getHearingsForDate(userId, role, dateStr);
+    if (hearingsOnDay.length === 0) return;
+    setSelectedDate(dateStr);
+    setSheetOpen(true);
+  }
+
+  function prevMonth() {
+    setCurrentMonth((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() - 1);
+      return d;
+    });
+  }
+
+  function nextMonth() {
+    setCurrentMonth((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() + 1);
+      return d;
+    });
+  }
+
+  const monthLabel = currentMonth.toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+  const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const sheetHearings = selectedDate
+    ? getHearingsForDate(userId, role, selectedDate)
+    : [];
+
+  const sheetDateLabel = selectedDate
+    ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "";
+
+  const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
+
+  return (
+    <div data-ocid="cases_tab.calendar.section" className="flex flex-col gap-4">
+      {/* Header */}
+      <div>
+        <h2 className="text-base font-bold text-foreground">
+          Hearing Calendar
+        </h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {upcomingHearings.length} upcoming hearing
+          {upcomingHearings.length !== 1 ? "s" : ""}
+        </p>
+      </div>
+
+      {/* Upcoming groups */}
+      {upcomingHearings.length === 0 ? (
+        <div
+          data-ocid="cases_tab.calendar.upcoming.empty_state"
+          className="bg-white rounded-2xl border border-border p-5 text-center"
+        >
+          <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-2" />
+          <p className="text-xs text-muted-foreground">
+            No upcoming hearings. Add hearing dates to your cases.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {upcomingGroups.map((group) => {
+            if (group.items.length === 0) return null;
+            return (
+              <div key={group.label}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    {group.label}
+                  </span>
+                  <span className="text-[10px] font-semibold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
+                    {group.items.length}
+                  </span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                <div className="flex flex-col gap-2">
+                  {group.items.map((c, idx) => {
+                    const clientData = loadAllClientData().find(
+                      (cd) => cd.userId === c.clientId,
+                    );
+                    const clientProfile = loadProfile(c.clientId);
+                    const clientName =
+                      clientProfile?.fullName || clientData?.name || "Client";
+                    const hearingInfo = getHearingLabel(c.nextHearingDate);
+                    return (
+                      <div
+                        key={c.id}
+                        data-ocid={`cases_tab.calendar.upcoming.item.${idx + 1}`}
+                        className="bg-white rounded-xl border border-border shadow-sm p-3 flex flex-col gap-1.5"
+                      >
+                        {role === "advocate" && (
+                          <p className="text-[10px] font-medium text-muted-foreground">
+                            Client: {clientName}
+                          </p>
+                        )}
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-bold text-foreground leading-snug flex-1 min-w-0 truncate">
+                            {c.caseTitle}
+                          </p>
+                          <span
+                            className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+                          >
+                            {c.caseStatus}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <Building2 className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{c.courtName}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {c.caseNumber}
+                        </span>
+                        <span
+                          className={`self-start inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${hearingInfo.color}`}
+                        >
+                          <Calendar className="w-2.5 h-2.5" />
+                          {hearingInfo.label} ·{" "}
+                          {new Date(
+                            `${c.nextHearingDate}T00:00:00`,
+                          ).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Calendar Grid */}
+      <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <button
+            data-ocid="cases_tab.calendar.prev_month.button"
+            type="button"
+            onClick={prevMonth}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-sm font-bold text-foreground">
+            {monthLabel}
+          </span>
+          <button
+            data-ocid="cases_tab.calendar.next_month.button"
+            type="button"
+            onClick={nextMonth}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Next month"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 border-b border-border">
+          {DOW_LABELS.map((dow) => (
+            <div
+              key={dow}
+              className="flex items-center justify-center py-2 text-[10px] font-semibold text-muted-foreground"
+            >
+              {dow}
+            </div>
+          ))}
+        </div>
+
+        <div className="p-1">
+          {weeks.map((week) => {
+            const weekKey = week.find((d) => d !== null) ?? `w${year}${month}`;
+            return (
+              <div
+                key={`week-${year}-${month}-${weekKey}`}
+                className="grid grid-cols-7"
+              >
+                {week.map((day, di) => {
+                  if (day === null) {
+                    return (
+                      <div
+                        key={`empty-${year}-${month}-col${di}-wk${weekKey}`}
+                        className="h-10"
+                      />
+                    );
+                  }
+                  const dateStr = toDateStr(day);
+                  const hearingsCount = getHearingsForDate(
+                    userId,
+                    role,
+                    dateStr,
+                  ).length;
+                  const isToday = dateStr === todayStr;
+                  const hasHearings = hearingsCount > 0;
+                  return (
+                    <button
+                      key={dateStr}
+                      data-ocid="cases_tab.calendar.date.button"
+                      type="button"
+                      onClick={() => handleDateClick(day)}
+                      disabled={!hasHearings}
+                      className={`relative h-10 flex flex-col items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        hasHearings
+                          ? "cursor-pointer hover:bg-primary/5 active:bg-primary/10"
+                          : "cursor-default"
+                      }`}
+                      aria-label={`${dateStr}${hasHearings ? `, ${hearingsCount} hearing${hearingsCount > 1 ? "s" : ""}` : ""}`}
+                    >
+                      <span
+                        className={`text-xs font-semibold leading-none flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
+                          isToday
+                            ? "bg-primary text-primary-foreground font-bold"
+                            : hasHearings
+                              ? "text-foreground"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {day}
+                      </span>
+                      {hasHearings && (
+                        <div className="flex items-center gap-0.5 mt-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-primary block" />
+                          {hearingsCount > 1 && (
+                            <span className="text-[8px] font-bold bg-primary text-primary-foreground px-1 rounded-full leading-none py-0.5">
+                              {hearingsCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border bg-muted/30">
+          <div className="flex items-center gap-1.5">
+            <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+              <span className="text-[9px] font-bold text-primary-foreground">
+                5
+              </span>
+            </div>
+            <span className="text-[10px] text-muted-foreground">Today</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+            <span className="text-[10px] text-muted-foreground">
+              Has hearings
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[8px] font-bold bg-primary text-primary-foreground px-1 rounded-full py-0.5">
+              3
+            </span>
+            <span className="text-[10px] text-muted-foreground">Count</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Day hearings sheet */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent
+          data-ocid="cases_tab.calendar.sheet"
+          side="bottom"
+          className="rounded-t-2xl max-h-[70vh] flex flex-col p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
+            <div className="flex items-start justify-between gap-2">
+              <SheetTitle className="text-sm font-bold text-foreground leading-snug">
+                Hearings on {sheetDateLabel}
+              </SheetTitle>
+              <button
+                data-ocid="cases_tab.calendar.sheet.close_button"
+                type="button"
+                onClick={() => setSheetOpen(false)}
+                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground text-left">
+              {sheetHearings.length} hearing
+              {sheetHearings.length !== 1 ? "s" : ""} scheduled
+            </p>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+            {sheetHearings.map((c, idx) => {
+              const cData = loadAllClientData().find(
+                (cd) => cd.userId === c.clientId,
+              );
+              const cProfile = loadProfile(c.clientId);
+              const clientName = cProfile?.fullName || cData?.name || "Client";
+              return (
+                <div
+                  key={c.id}
+                  data-ocid={`cases_tab.calendar.sheet.item.${idx + 1}`}
+                  className="bg-muted/30 rounded-xl border border-border p-3 flex flex-col gap-1.5"
+                >
+                  {role === "advocate" && (
+                    <p className="text-[10px] font-medium text-muted-foreground">
+                      Client: {clientName}
+                    </p>
+                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-bold text-foreground leading-snug flex-1 min-w-0">
+                      {c.caseTitle}
+                    </p>
+                    <span
+                      className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+                    >
+                      {c.caseStatus}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Building2 className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{c.courtName}</span>
+                  </div>
+                  {c.caseNumber && (
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {c.caseNumber}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+// ── CasesTab (shell-level component, no own header) ────────────────────────────
+
+function CasesTab({ user }: { user: StoredUser | null }) {
+  const [activeSubTab, setActiveSubTab] = useState<CasesSubTab>("my-cases");
+
+  const subTabs: { id: CasesSubTab; label: string }[] = [
+    { id: "my-cases", label: "My Cases" },
+    { id: "hearings", label: "Hearings" },
+    { id: "calendar", label: "Calendar" },
+  ];
+
+  return (
+    <div data-ocid="cases_tab.section" className="flex flex-col min-h-full">
+      {/* Sticky sub-tab pill row */}
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border px-4 py-2.5">
+        <div className="flex items-center gap-1 bg-muted/60 rounded-full p-1">
+          {subTabs.map((tab) => (
+            <button
+              key={tab.id}
+              data-ocid={`cases_tab.${tab.id}.tab`}
+              type="button"
+              onClick={() => setActiveSubTab(tab.id)}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                activeSubTab === tab.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Sub-tab content */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-8">
+        {activeSubTab === "my-cases" && <MyCasesSubTab user={user} />}
+        {activeSubTab === "hearings" && <HearingsSubTab user={user} />}
+        {activeSubTab === "calendar" && <CalendarSubTab user={user} />}
+      </div>
+    </div>
+  );
+}
+
 // ─── My Cases Page ────────────────────────────────────────────────────────────
 
 function MyCasesPage({
@@ -7033,6 +9217,1030 @@ function ChatScreen({
           {/* Send button */}
           <button
             data-ocid="chat.send_button"
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend || isSending}
+            className="shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Messages Tab (AppShell version) ─────────────────────────────────────────
+
+type MessagesTabView = "list" | "chat";
+
+function getOnlineStatus(
+  myMobile: string,
+  partnerId: string,
+): { online: boolean; label: string } {
+  const convId = getConversationId(myMobile, partnerId);
+  const lastMsg = getConversationLastMessage(convId);
+  if (!lastMsg) return { online: false, label: "Not yet connected" };
+  const diffMs = Date.now() - new Date(lastMsg.timestamp).getTime();
+  if (diffMs < 5 * 60 * 1000) return { online: true, label: "Online" };
+  return {
+    online: false,
+    label: `Last seen ${formatMsgTime(lastMsg.timestamp)}`,
+  };
+}
+
+function MessagesTab({ user }: { user: StoredUser }) {
+  const [view, setView] = useState<MessagesTabView>("list");
+  const [chatPartnerId, setChatPartnerIdLocal] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [tick, setTick] = useState(0);
+
+  // Refresh conversations list when returning to list view
+  useEffect(() => {
+    if (view === "list") setTick((v) => v + 1);
+  }, [view]);
+
+  // Listen for advocate-network open-chat events
+  useEffect(() => {
+    function handleNetworkChat(e: Event) {
+      const evt = e as CustomEvent<{ partnerId: string }>;
+      const convId = getConversationId(user.mobile, evt.detail.partnerId);
+      markConversationAsSeen(convId, user.mobile);
+      setChatPartnerIdLocal(evt.detail.partnerId);
+      setView("chat");
+    }
+    window.addEventListener("advocate-network-open-chat", handleNetworkChat);
+    return () =>
+      window.removeEventListener(
+        "advocate-network-open-chat",
+        handleNetworkChat,
+      );
+  }, [user.mobile]);
+
+  const profile = loadProfile(user.mobile);
+  const isAdvocate = user.role === "advocate";
+
+  // Build conversation list
+  type ConvItem = {
+    partnerId: string;
+    partnerName: string;
+    partnerInitials: string;
+    partnerPhoto: string | undefined;
+    conversationId: string;
+    lastMsg: StoredMessage | null;
+    unread: number;
+    onlineStatus: { online: boolean; label: string };
+  };
+
+  const conversations: ConvItem[] = useMemo(() => {
+    // tick is used to trigger re-computation
+    void tick;
+    let convs: ConvItem[] = [];
+
+    if (isAdvocate) {
+      const advData = loadAllAdvocateData().find(
+        (a) => a.userId === user.mobile,
+      );
+      const clients = advData
+        ? getClientsForAdvocate(advData.referralCode)
+        : [];
+      const clientConvs: ConvItem[] = clients.map((c) => {
+        const cProfile = loadProfile(c.userId);
+        const name = cProfile?.fullName || c.name || "Client";
+        const initials = name
+          .split(" ")
+          .map((w: string) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        const convId = getConversationId(user.mobile, c.userId);
+        return {
+          partnerId: c.userId,
+          partnerName: name,
+          partnerInitials: initials,
+          partnerPhoto: cProfile?.profilePhoto,
+          conversationId: convId,
+          lastMsg: getConversationLastMessage(convId),
+          unread: getUnreadCount(convId, user.mobile),
+          onlineStatus: getOnlineStatus(user.mobile, c.userId),
+        };
+      });
+
+      // Also include connected advocate network conversations
+      const networkIds = getConnectedAdvocateIds(user.mobile);
+      const networkConvs: ConvItem[] = networkIds.map((otherId) => {
+        const pProfile = loadProfile(otherId);
+        const name = pProfile?.fullName || "Advocate";
+        const initials = name
+          .split(" ")
+          .map((w: string) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        const convId = getConversationId(user.mobile, otherId);
+        return {
+          partnerId: otherId,
+          partnerName: name,
+          partnerInitials: initials,
+          partnerPhoto: pProfile?.profilePhoto,
+          conversationId: convId,
+          lastMsg: getConversationLastMessage(convId),
+          unread: getUnreadCount(convId, user.mobile),
+          onlineStatus: getOnlineStatus(user.mobile, otherId),
+        };
+      });
+
+      // Merge, deduplicate by partnerId
+      const seen = new Set<string>();
+      convs = [...clientConvs, ...networkConvs].filter((c) => {
+        if (seen.has(c.partnerId)) return false;
+        seen.add(c.partnerId);
+        return true;
+      });
+    } else {
+      const clientData = loadAllClientData().find(
+        (c) => c.userId === user.mobile,
+      );
+      if (clientData?.linkedAdvocateId) {
+        const advocate = loadAllAdvocateData().find(
+          (a) =>
+            a.referralCode.toUpperCase() ===
+            clientData.linkedAdvocateId!.toUpperCase(),
+        );
+        if (advocate) {
+          const advProfile = loadProfile(advocate.userId);
+          const name = advProfile?.fullName || advocate.name || "Advocate";
+          const initials = name
+            .split(" ")
+            .map((w: string) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase();
+          const convId = getConversationId(user.mobile, advocate.userId);
+          convs = [
+            {
+              partnerId: advocate.userId,
+              partnerName: name,
+              partnerInitials: initials,
+              partnerPhoto: advProfile?.profilePhoto,
+              conversationId: convId,
+              lastMsg: getConversationLastMessage(convId),
+              unread: getUnreadCount(convId, user.mobile),
+              onlineStatus: getOnlineStatus(user.mobile, advocate.userId),
+            },
+          ];
+        }
+      }
+    }
+
+    // Sort by most recent message
+    convs.sort((a, b) => {
+      if (!a.lastMsg && !b.lastMsg) return 0;
+      if (!a.lastMsg) return 1;
+      if (!b.lastMsg) return -1;
+      return (
+        new Date(b.lastMsg.timestamp).getTime() -
+        new Date(a.lastMsg.timestamp).getTime()
+      );
+    });
+
+    return convs;
+  }, [isAdvocate, user.mobile, tick]);
+
+  // Filtered conversations by search
+  const filteredConversations = useMemo(() => {
+    if (!searchQuery.trim()) return conversations;
+    const q = searchQuery.toLowerCase();
+    return conversations.filter((c) => c.partnerName.toLowerCase().includes(q));
+  }, [conversations, searchQuery]);
+
+  function openChat(partnerId: string) {
+    const convId = getConversationId(user.mobile, partnerId);
+    markConversationAsSeen(convId, user.mobile);
+    setChatPartnerIdLocal(partnerId);
+    setView("chat");
+  }
+
+  function closeChat() {
+    setChatPartnerIdLocal(null);
+    setView("list");
+  }
+
+  // ── Conversation List View ──
+  if (view === "list") {
+    return (
+      <div
+        data-ocid="messages_tab.section"
+        className="flex flex-col min-h-full bg-[#f3f4f6]"
+      >
+        {/* Search bar */}
+        <div className="px-4 pt-3 pb-2 bg-white border-b border-border sticky top-0 z-10">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <input
+              data-ocid="messages_tab.search_input"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search conversations..."
+              className="w-full pl-9 pr-4 h-10 rounded-full border border-border bg-muted/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:bg-white transition-colors"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors focus:outline-none"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Conversation list */}
+        <div className="flex-1 overflow-y-auto px-3 py-3">
+          {filteredConversations.length === 0 ? (
+            <div
+              data-ocid="messages_tab.empty_state"
+              className="flex flex-col items-center justify-center text-center py-16 gap-4"
+            >
+              <div className="w-20 h-20 rounded-full bg-primary/8 border border-primary/10 flex items-center justify-center">
+                <MessageCircle className="w-9 h-9 text-primary/40" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-foreground">
+                  No conversations yet
+                </p>
+                <p className="text-sm text-muted-foreground mt-1.5 max-w-[240px] leading-relaxed">
+                  {searchQuery
+                    ? "No results found. Try a different name."
+                    : "Connect with clients to start chatting."}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {filteredConversations.map((conv, idx) => {
+                const preview = conv.lastMsg
+                  ? conv.lastMsg.fileAttachment
+                    ? `📎 ${conv.lastMsg.fileAttachment.fileName}`
+                    : conv.lastMsg.text.length > 42
+                      ? `${conv.lastMsg.text.slice(0, 42)}…`
+                      : conv.lastMsg.text
+                  : "No messages yet";
+                const timeStr = conv.lastMsg
+                  ? formatMsgTime(conv.lastMsg.timestamp)
+                  : "";
+                const hasUnread = conv.unread > 0;
+
+                return (
+                  <button
+                    key={conv.partnerId}
+                    data-ocid={`messages_tab.conversation.item.${idx + 1}`}
+                    type="button"
+                    onClick={() => openChat(conv.partnerId)}
+                    className="flex items-center gap-3 bg-white rounded-2xl border border-border shadow-sm px-4 py-3 hover:shadow-md hover:border-primary/20 transition-all duration-150 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99]"
+                  >
+                    {/* Avatar + online indicator */}
+                    <div className="relative shrink-0">
+                      <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-border bg-primary/10 flex items-center justify-center">
+                        {conv.partnerPhoto ? (
+                          <img
+                            src={conv.partnerPhoto}
+                            alt={conv.partnerName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span
+                            className={`text-sm font-bold text-white ${getAvatarColorFromName(conv.partnerName)}`}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "100%",
+                              height: "100%",
+                            }}
+                          >
+                            {conv.partnerInitials}
+                          </span>
+                        )}
+                      </div>
+                      {/* Online dot */}
+                      <span
+                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
+                          conv.onlineStatus.online
+                            ? "bg-green-400"
+                            : "bg-gray-300"
+                        }`}
+                      />
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-sm truncate ${hasUnread ? "font-bold text-foreground" : "font-semibold text-foreground/90"}`}
+                        >
+                          {conv.partnerName}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          {timeStr}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                        <span
+                          className={`text-xs truncate ${hasUnread ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                        >
+                          {preview}
+                        </span>
+                        {hasUnread && (
+                          <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-1">
+                            {conv.unread > 99 ? "99+" : conv.unread}
+                          </span>
+                        )}
+                      </div>
+                      {/* Online label */}
+                      <p
+                        className={`text-[10px] mt-0.5 font-medium ${
+                          conv.onlineStatus.online
+                            ? "text-green-500"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {conv.onlineStatus.label}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Chat View ──
+  if (view === "chat" && chatPartnerId) {
+    return (
+      <MessagesTabChat
+        user={user}
+        partnerUserId={chatPartnerId}
+        onBack={closeChat}
+        userProfile={profile}
+      />
+    );
+  }
+
+  return null;
+}
+
+// ─── Messages Tab – Chat Sub-View ─────────────────────────────────────────────
+
+function MessagesTabChat({
+  user,
+  partnerUserId,
+  onBack,
+  userProfile,
+}: {
+  user: StoredUser;
+  partnerUserId: string;
+  onBack: () => void;
+  userProfile: StoredProfile | null;
+}) {
+  const partnerProfile = loadProfile(partnerUserId);
+  const partnerName =
+    partnerProfile?.fullName ||
+    (user.role === "advocate" ? "Client" : "Advocate");
+  const partnerInitials = partnerName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const conversationId = getConversationId(user.mobile, partnerUserId);
+  const onlineStatus = getOnlineStatus(user.mobile, partnerUserId);
+
+  const [messages, setMessages] = useState<StoredMessage[]>(() =>
+    loadConversationMessages(conversationId),
+  );
+  const [inputText, setInputText] = useState("");
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [casePickerOpen, setCasePickerOpen] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Clean up lightbox blob URL when it closes
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    return () => {
+      URL.revokeObjectURL(lightboxSrc);
+    };
+  }, [lightboxSrc]);
+
+  // Mark as seen on mount
+  useEffect(() => {
+    markConversationAsSeen(conversationId, user.mobile);
+  }, [conversationId, user.mobile]);
+
+  // Auto-scroll to bottom when messages change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional scroll-to-bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Reload messages from storage
+  useEffect(() => {
+    setMessages(loadConversationMessages(conversationId));
+  }, [conversationId]);
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      toast.error("Only PDF, DOC, DOCX, JPG, PNG files are allowed.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast.error("File size exceeds the 25 MB limit.");
+      return;
+    }
+    setPendingFile(file);
+    e.target.value = "";
+  }
+
+  function sendMessage(
+    text: string,
+    fileAttachment?: StoredMessage["fileAttachment"],
+  ) {
+    const myName =
+      userProfile?.fullName ||
+      (user.mobile === "google-demo" ? "Demo User" : "User");
+
+    const msgId = generateMsgId();
+    const msg: StoredMessage = {
+      id: msgId,
+      conversationId,
+      senderId: user.mobile,
+      senderName: myName,
+      senderRole: user.role,
+      text,
+      fileAttachment,
+      timestamp: new Date().toISOString(),
+      seen: false,
+      delivered: false,
+    };
+
+    saveMessageToStorage(msg);
+    setMessages(loadConversationMessages(conversationId));
+
+    // Simulate delivery after ~1.5 s
+    setTimeout(() => {
+      const all = loadAllMessages();
+      const updated = all.map((m) =>
+        m.id === msgId ? { ...m, delivered: true } : m,
+      );
+      localStorage.setItem(LS_MESSAGES_KEY, JSON.stringify(updated));
+      setMessages(loadConversationMessages(conversationId));
+    }, 1500);
+  }
+
+  function handleSend() {
+    if (!inputText.trim() && !pendingFile) return;
+    setIsSending(true);
+
+    let fileAttachment: StoredMessage["fileAttachment"] | undefined = undefined;
+    if (pendingFile) {
+      const fileId = generateChatFileId();
+      chatFileBlobStore.set(fileId, pendingFile);
+      fileAttachment = {
+        id: fileId,
+        fileName: pendingFile.name,
+        fileSize: pendingFile.size,
+        fileType: pendingFile.type,
+      };
+    }
+
+    sendMessage(inputText.trim(), fileAttachment);
+    setInputText("");
+    setPendingFile(null);
+    setIsSending(false);
+  }
+
+  function handleCaseUpdate(c: StoredCase) {
+    setCasePickerOpen(false);
+    const text = `CASE_UPDATE::${c.caseNumber}::${c.caseTitle}::${c.courtName}::${c.nextHearingDate}`;
+    sendMessage(text);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  function downloadChatFile(fileId: string, fileName: string) {
+    const blob = chatFileBlobStore.get(fileId);
+    if (!blob) {
+      toast.error("File unavailable – please re-upload.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function openImageLightbox(fileId: string) {
+    const blob = chatFileBlobStore.get(fileId);
+    if (!blob) return;
+    // revoke previous lightbox URL if any
+    if (lightboxSrc) URL.revokeObjectURL(lightboxSrc);
+    setLightboxSrc(URL.createObjectURL(blob));
+  }
+
+  function closeLightbox() {
+    if (lightboxSrc) URL.revokeObjectURL(lightboxSrc);
+    setLightboxSrc(null);
+  }
+
+  const canSend = inputText.trim().length > 0 || pendingFile !== null;
+  const advocateCases =
+    user.role === "advocate"
+      ? loadCases().filter((c) => c.advocateId === user.mobile)
+      : [];
+
+  return (
+    <div
+      data-ocid="messages_tab.chat.section"
+      className="flex flex-col bg-background"
+      style={{ minHeight: "calc(100dvh - 112px)" }}
+    >
+      {/* ── Image Lightbox ── */}
+      {lightboxSrc && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center"
+          onClick={closeLightbox}
+          onKeyDown={(e) => e.key === "Escape" && closeLightbox()}
+        >
+          <button
+            data-ocid="messages_tab.chat.lightbox.close_button"
+            type="button"
+            onClick={closeLightbox}
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white z-[101]"
+            aria-label="Close image"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <img
+            src={lightboxSrc}
+            alt="Full size"
+            className="max-w-[95vw] max-h-[90dvh] object-contain rounded-lg"
+          />
+        </div>
+      )}
+
+      {/* ── Case Picker Sheet (advocates only) ── */}
+      <Sheet open={casePickerOpen} onOpenChange={setCasePickerOpen}>
+        <SheetContent
+          side="bottom"
+          className="rounded-t-2xl max-h-[70dvh] overflow-y-auto"
+        >
+          <SheetHeader className="mb-3">
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <Scale className="w-4 h-4 text-amber-600" />
+              Send Case Update
+            </SheetTitle>
+          </SheetHeader>
+          {advocateCases.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No cases found. Add cases to your clients first.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2 pb-4">
+              {advocateCases.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => handleCaseUpdate(c)}
+                  className="w-full text-left rounded-xl border border-border bg-white hover:bg-amber-50 hover:border-amber-200 transition-colors px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <p className="text-xs font-mono font-bold text-primary">
+                    {c.caseNumber}
+                  </p>
+                  <p className="text-sm font-semibold text-foreground truncate mt-0.5">
+                    {c.caseTitle}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                    {c.courtName}
+                    {c.nextHearingDate
+                      ? ` · Hearing: ${c.nextHearingDate}`
+                      : ""}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Chat sub-header ── */}
+      <div className="flex items-center gap-2.5 px-3 py-2.5 bg-white border-b border-border shadow-sm shrink-0 sticky top-0 z-20">
+        {/* Back */}
+        <button
+          data-ocid="messages_tab.chat.back.button"
+          type="button"
+          onClick={onBack}
+          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring -ml-1 shrink-0"
+          aria-label="Back to messages"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+
+        {/* Partner avatar + online dot */}
+        <div className="relative shrink-0">
+          <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-border bg-primary/10 flex items-center justify-center">
+            {partnerProfile?.profilePhoto ? (
+              <img
+                src={partnerProfile.profilePhoto}
+                alt={partnerName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span
+                className="text-xs font-bold text-white"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span
+                  className={`w-full h-full flex items-center justify-center rounded-full ${getAvatarColorFromName(partnerName)}`}
+                >
+                  {partnerInitials}
+                </span>
+              </span>
+            )}
+          </div>
+          <span
+            className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 border-white ${
+              onlineStatus.online ? "bg-green-400" : "bg-gray-300"
+            }`}
+          />
+        </div>
+
+        {/* Partner name + online/last seen */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-foreground truncate leading-tight">
+            {partnerName}
+          </p>
+          <p
+            className={`text-[11px] font-medium leading-tight ${
+              onlineStatus.online ? "text-green-500" : "text-muted-foreground"
+            }`}
+          >
+            {onlineStatus.label}
+          </p>
+        </div>
+
+        {/* Call + Video buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            data-ocid="messages_tab.chat.call.button"
+            type="button"
+            onClick={() => toast.info("Call feature coming soon")}
+            className="flex items-center justify-center w-9 h-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Call"
+          >
+            <Phone className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
+          </button>
+          <button
+            data-ocid="messages_tab.chat.video.button"
+            type="button"
+            onClick={() => toast.info("Video call feature coming soon")}
+            className="flex items-center justify-center w-9 h-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Video call"
+          >
+            <Video className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Message list (scrollable, fills remaining height) ── */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2 bg-[#f3f4f6]">
+        {messages.length === 0 ? (
+          <div
+            data-ocid="messages_tab.chat.empty_state"
+            className="flex flex-col flex-1 items-center justify-center text-center py-10 gap-3"
+          >
+            <div className="w-14 h-14 rounded-full bg-white border border-border flex items-center justify-center shadow-sm">
+              <MessageCircle className="w-6 h-6 text-primary/40" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">
+              Start a conversation
+            </p>
+            <p className="text-xs text-muted-foreground">Say hello! 👋</p>
+          </div>
+        ) : (
+          messages.map((msg, idx) => {
+            const isMe = msg.senderId === user.mobile;
+            const isCaseUpdate = msg.text.startsWith("CASE_UPDATE::");
+
+            // Parse case update message
+            let caseUpdateParts: string[] = [];
+            if (isCaseUpdate) {
+              caseUpdateParts = msg.text.split("::").slice(1);
+            }
+
+            const FileIconComp = msg.fileAttachment
+              ? getFileIcon(msg.fileAttachment.fileType)
+              : File;
+            const blobAvailable = msg.fileAttachment
+              ? chatFileBlobStore.has(msg.fileAttachment.id)
+              : false;
+            const isImageAttachment =
+              msg.fileAttachment?.fileType.startsWith("image/") &&
+              blobAvailable;
+
+            return (
+              <div
+                key={msg.id}
+                data-ocid={`messages_tab.chat.message.item.${idx + 1}`}
+                className={`flex flex-col ${isMe ? "items-end" : "items-start"} gap-0.5`}
+              >
+                {/* Sender name for partner messages */}
+                {!isMe && (
+                  <span className="text-[11px] text-muted-foreground font-medium px-1 mb-0.5">
+                    {msg.senderName}
+                  </span>
+                )}
+
+                {/* ── Case Update Bubble ── */}
+                {isCaseUpdate ? (
+                  <div
+                    className={`max-w-[82%] rounded-2xl px-3.5 py-3 border ${
+                      isMe
+                        ? "bg-amber-100 border-amber-300 rounded-br-sm"
+                        : "bg-amber-50 border-amber-200 rounded-bl-sm shadow-sm"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Scale className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                        Case Update
+                      </span>
+                    </div>
+                    {caseUpdateParts[0] && (
+                      <p className="text-xs font-mono font-bold text-amber-900 mb-1">
+                        {caseUpdateParts[0]}
+                      </p>
+                    )}
+                    {caseUpdateParts[1] && (
+                      <p className="text-sm font-semibold text-amber-900 leading-snug">
+                        {caseUpdateParts[1]}
+                      </p>
+                    )}
+                    {(caseUpdateParts[2] || caseUpdateParts[3]) && (
+                      <p className="text-[11px] text-amber-700 mt-1">
+                        {caseUpdateParts[2]}
+                        {caseUpdateParts[3]
+                          ? ` · Hearing: ${caseUpdateParts[3]}`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  /* ── Regular / File Bubble ── */
+                  <div
+                    className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 ${
+                      isMe
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-white text-foreground rounded-bl-sm shadow-sm border border-border/60"
+                    }`}
+                  >
+                    {msg.text && (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                        {msg.text}
+                      </p>
+                    )}
+
+                    {/* Image attachment – inline preview */}
+                    {msg.fileAttachment && isImageAttachment && (
+                      <div className="mt-1.5 relative">
+                        <button
+                          type="button"
+                          className="w-full p-0 border-0 bg-transparent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
+                          onClick={() =>
+                            openImageLightbox(msg.fileAttachment!.id)
+                          }
+                          aria-label="View image"
+                        >
+                          <img
+                            src={URL.createObjectURL(
+                              chatFileBlobStore.get(msg.fileAttachment.id)!,
+                            )}
+                            alt={msg.fileAttachment.fileName}
+                            className="max-h-[180px] w-full object-cover rounded-xl"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadChatFile(
+                              msg.fileAttachment!.id,
+                              msg.fileAttachment!.fileName,
+                            )
+                          }
+                          className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors focus-visible:outline-none"
+                          aria-label="Download image"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Document attachment – card */}
+                    {msg.fileAttachment && !isImageAttachment && (
+                      <div
+                        className={`mt-1.5 rounded-xl border p-2.5 flex items-center gap-2.5 ${
+                          isMe
+                            ? "bg-white/15 border-white/20"
+                            : "bg-muted/40 border-border"
+                        }`}
+                      >
+                        <div
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                            isMe ? "bg-white/20" : "bg-primary/10"
+                          }`}
+                        >
+                          <FileIconComp
+                            className={`w-4 h-4 ${isMe ? "text-white" : "text-primary"}`}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className={`text-xs font-semibold truncate ${isMe ? "text-white" : "text-foreground"}`}
+                          >
+                            {msg.fileAttachment.fileName}
+                          </p>
+                          <p
+                            className={`text-[10px] mt-0.5 ${isMe ? "text-white/70" : "text-muted-foreground"}`}
+                          >
+                            {formatFileSize(msg.fileAttachment.fileSize)}
+                          </p>
+                        </div>
+                        {blobAvailable ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              downloadChatFile(
+                                msg.fileAttachment!.id,
+                                msg.fileAttachment!.fileName,
+                              )
+                            }
+                            className={`shrink-0 p-1.5 rounded-lg transition-colors ${
+                              isMe
+                                ? "text-white hover:bg-white/20"
+                                : "text-primary hover:bg-primary/10"
+                            } focus-visible:outline-none`}
+                            aria-label="Download file"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span
+                            className={`text-[10px] shrink-0 ${isMe ? "text-white/60" : "text-muted-foreground"}`}
+                          >
+                            Unavailable
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Timestamp + tick (my messages) */}
+                {isMe && (
+                  <div className="flex items-center gap-1 px-1">
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatMsgTime(msg.timestamp)}
+                    </span>
+                    {msg.seen ? (
+                      <CheckCheck className="w-3.5 h-3.5 text-primary" />
+                    ) : msg.delivered ? (
+                      <CheckCheck className="w-3.5 h-3.5 text-muted-foreground" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                )}
+                {/* Timestamp for partner messages */}
+                {!isMe && (
+                  <span className="text-[10px] text-muted-foreground px-1">
+                    {formatMsgTime(msg.timestamp)}
+                  </span>
+                )}
+              </div>
+            );
+          })
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* ── Input bar (sticky above bottom nav) ── */}
+      <div className="shrink-0 bg-white border-t border-border px-3 py-2.5">
+        {/* Pending file preview */}
+        {pendingFile && (
+          <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2 mb-2">
+            {pendingFile.type.startsWith("image/") ? (
+              <ImageIcon className="w-4 h-4 text-primary shrink-0" />
+            ) : (
+              <FileText className="w-4 h-4 text-primary shrink-0" />
+            )}
+            <span className="text-xs font-medium text-foreground truncate flex-1">
+              {pendingFile.name}
+            </span>
+            <span className="text-xs text-muted-foreground shrink-0">
+              {formatFileSize(pendingFile.size)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPendingFile(null)}
+              className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
+              aria-label="Remove file"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
+          {/* File attach */}
+          <button
+            data-ocid="messages_tab.chat.attach_button"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 w-9 h-9 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Attach file"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
+          {/* Case update button (advocates only) */}
+          {user.role === "advocate" && (
+            <button
+              data-ocid="messages_tab.chat.case_update.button"
+              type="button"
+              onClick={() => setCasePickerOpen(true)}
+              className="shrink-0 w-9 h-9 rounded-full border border-amber-200 bg-amber-50 flex items-center justify-center text-amber-600 hover:bg-amber-100 hover:border-amber-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              aria-label="Send case update"
+              title="Send case update"
+            >
+              <Scale className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Text input */}
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              data-ocid="messages_tab.chat.input"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message..."
+              rows={1}
+              className="w-full resize-none rounded-2xl border border-border bg-muted/30 px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+              style={{
+                maxHeight: "4.5rem",
+                overflowY: "auto",
+                lineHeight: "1.4",
+              }}
+            />
+          </div>
+
+          {/* Send */}
+          <button
+            data-ocid="messages_tab.chat.send_button"
             type="button"
             onClick={handleSend}
             disabled={!canSend || isSending}
@@ -9806,6 +13014,27 @@ function AdvocateDiscoveryProfilePage({
     );
   });
 
+  // Advocate-to-advocate connection status
+  const [networkStatus, setNetworkStatus] = useState<
+    "none" | "pending_sent" | "pending_received" | "connected" | "rejected"
+  >(() => {
+    if (!user || user.role !== "advocate") return "none";
+    return getConnectionStatus(user.mobile, advocateUserId);
+  });
+  const [networkConnectionId, setNetworkConnectionId] = useState<string | null>(
+    () => {
+      if (!user || user.role !== "advocate") return null;
+      const conn = loadConnections().find(
+        (c) =>
+          (c.fromAdvocateId === user!.mobile &&
+            c.toAdvocateId === advocateUserId) ||
+          (c.fromAdvocateId === advocateUserId &&
+            c.toAdvocateId === user!.mobile),
+      );
+      return conn?.id ?? null;
+    },
+  );
+
   if (!profile || !advData) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center px-6 py-12">
@@ -9838,6 +13067,34 @@ function AdvocateDiscoveryProfilePage({
     });
     setConnected(true);
     toast.success(`Connected with ${profile!.fullName}!`);
+  }
+
+  function handleNetworkConnect() {
+    if (!user || !isAdvocateUser) return;
+    sendConnectionRequest(user.mobile, advocateUserId);
+    const conn = loadConnections().find(
+      (c) =>
+        c.fromAdvocateId === user!.mobile && c.toAdvocateId === advocateUserId,
+    );
+    setNetworkConnectionId(conn?.id ?? null);
+    setNetworkStatus("pending_sent");
+    toast.success(`Connection request sent to ${profile!.fullName}!`);
+  }
+
+  function handleNetworkAccept() {
+    if (!user || !networkConnectionId) return;
+    acceptConnection(networkConnectionId, user.mobile);
+    setNetworkStatus("connected");
+    toast.success(`Connected with ${profile!.fullName}!`);
+  }
+
+  function handleNetworkMessageClick() {
+    if (!user) return;
+    window.dispatchEvent(
+      new CustomEvent("advocate-network-open-chat", {
+        detail: { partnerId: advocateUserId },
+      }),
+    );
   }
 
   function handleReferralConnect(e: React.FormEvent) {
@@ -9984,10 +13241,16 @@ function AdvocateDiscoveryProfilePage({
                   Connected
                 </span>
               )}
-              {isAdvocateUser && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
-                  <Users className="w-3.5 h-3.5" />
+              {isAdvocateUser && networkStatus === "connected" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                  <UserCheck className="w-3.5 h-3.5" />
                   Network
+                </span>
+              )}
+              {isAdvocateUser && networkStatus === "pending_sent" && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                  <Check className="w-3.5 h-3.5" />
+                  Request Sent
                 </span>
               )}
             </div>
@@ -10084,6 +13347,68 @@ function AdvocateDiscoveryProfilePage({
           </div>
         )}
 
+        {/* Advocate-to-advocate network connect actions */}
+        {isAdvocateUser && user?.mobile !== advocateUserId && (
+          <div className="px-5 pb-4 flex flex-col gap-3">
+            {networkStatus === "none" && (
+              <Button
+                data-ocid="advocate-discovery-profile.network.connect.primary_button"
+                type="button"
+                onClick={handleNetworkConnect}
+                className="h-11 text-sm font-semibold w-full rounded-xl flex items-center gap-2"
+              >
+                <UserPlus className="w-4 h-4" />
+                Connect with {profile.fullName.split(" ")[0]}
+              </Button>
+            )}
+            {networkStatus === "pending_sent" && (
+              <div className="h-11 flex items-center justify-center gap-2 text-sm font-semibold text-muted-foreground bg-muted/50 border border-border rounded-xl">
+                <Check className="w-4 h-4" />
+                Request Sent
+              </div>
+            )}
+            {networkStatus === "pending_received" && (
+              <div className="flex gap-2">
+                <Button
+                  data-ocid="advocate-discovery-profile.network.accept.button"
+                  type="button"
+                  onClick={handleNetworkAccept}
+                  className="flex-1 h-11 text-sm font-semibold rounded-xl bg-green-600 hover:bg-green-700"
+                >
+                  <UserCheck className="w-4 h-4 mr-1.5" />
+                  Accept Request
+                </Button>
+                <Button
+                  data-ocid="advocate-discovery-profile.network.reject.button"
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (networkConnectionId) {
+                      rejectConnection(networkConnectionId);
+                      setNetworkStatus("rejected");
+                    }
+                  }}
+                  className="flex-1 h-11 text-sm font-semibold rounded-xl text-destructive border-destructive/30 hover:bg-destructive/5"
+                >
+                  Decline
+                </Button>
+              </div>
+            )}
+            {networkStatus === "connected" && (
+              <Button
+                data-ocid="advocate-discovery-profile.network.message.button"
+                type="button"
+                variant="outline"
+                onClick={handleNetworkMessageClick}
+                className="h-11 text-sm font-semibold w-full rounded-xl flex items-center gap-2"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Message {profile.fullName.split(" ")[0]}
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* Divider */}
         <div className="mx-5 h-px bg-border mb-5" />
 
@@ -10152,8 +13477,472 @@ function AdvocateDiscoveryProfilePage({
               </div>
             )}
           </div>
+
+          {/* Posts by this advocate */}
+          {(() => {
+            const posts = loadUserPosts().filter(
+              (p) => p.authorName === profile.fullName,
+            );
+            if (posts.length === 0) return null;
+            return (
+              <div className="mt-4">
+                <h2 className="text-sm font-bold text-foreground mb-3">
+                  Recent Posts
+                </h2>
+                <div className="flex flex-col gap-3">
+                  {posts.slice(0, 3).map((post) => (
+                    <div
+                      key={post.id}
+                      className="bg-muted/30 rounded-xl p-3 border border-border"
+                    >
+                      <p className="text-xs text-foreground leading-relaxed line-clamp-3">
+                        {post.text}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-1.5">
+                        {formatTimeAgo(post.timestamp)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ─── Advocate Network Tab ─────────────────────────────────────────────────────
+
+type NetworkSubTab = "my_network" | "pending" | "suggested";
+
+function AdvocateNetworkTab({ user }: { user: StoredUser }) {
+  const [subTab, setSubTab] = useState<NetworkSubTab>("my_network");
+  const [tick, setTick] = useState(0);
+  const myProfile = loadProfile(user.mobile);
+
+  function refresh() {
+    setTick((v) => v + 1);
+  }
+
+  // ── My Network ──
+  const networkConnections = useMemo(() => {
+    void tick;
+    return getMyNetworkConnections(user.mobile);
+  }, [user.mobile, tick]);
+
+  const networkAdvocates = useMemo(() => {
+    return networkConnections.map((conn) => {
+      const otherId =
+        conn.fromAdvocateId === user.mobile
+          ? conn.toAdvocateId
+          : conn.fromAdvocateId;
+      return { conn, otherId, profile: loadProfile(otherId) };
+    });
+  }, [networkConnections, user.mobile]);
+
+  // ── Pending ──
+  const incomingRequests = useMemo(() => {
+    void tick;
+    return getPendingIncoming(user.mobile).map((conn) => ({
+      conn,
+      profile: loadProfile(conn.fromAdvocateId),
+    }));
+  }, [user.mobile, tick]);
+
+  const outgoingRequests = useMemo(() => {
+    void tick;
+    return getPendingOutgoing(user.mobile).map((conn) => ({
+      conn,
+      profile: loadProfile(conn.toAdvocateId),
+    }));
+  }, [user.mobile, tick]);
+
+  const pendingCount = incomingRequests.length;
+
+  // ── Suggested ──
+  const [sentIds, setSentIds] = useState<Set<string>>(new Set());
+  const suggested = useMemo(() => {
+    void tick;
+    return getSuggestedAdvocates(user.mobile);
+  }, [user.mobile, tick]);
+
+  function openChat(partnerId: string) {
+    // Open chat inline within MessagesTab by navigating
+    // We'll use the same internal chat pattern from MessagesTab
+    // but since we're in a separate tab, we trigger a tab change hack via event
+    // Instead just send a toast that directs user to messages
+    // Actually we need a more direct approach - internal chat navigation in Network
+    window.dispatchEvent(
+      new CustomEvent("advocate-network-open-chat", { detail: { partnerId } }),
+    );
+  }
+
+  // ─── Advocate card sub-component ───
+  function AdvocateCard({
+    profile: p,
+    action,
+    tags,
+    ocidIndex,
+  }: {
+    profile: StoredProfile | null;
+    action: React.ReactNode;
+    tags?: string[];
+    ocidIndex: number;
+  }) {
+    if (!p) return null;
+    const initials = p.fullName
+      .split(" ")
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+    const avatarColor = getAvatarColorFromNameStatic(p.fullName);
+    return (
+      <div
+        data-ocid={`network.advocate.item.${ocidIndex}`}
+        className="bg-white rounded-xl border border-border shadow-sm p-4 flex items-start gap-3"
+      >
+        {/* Avatar */}
+        <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 border-2 border-border">
+          {p.profilePhoto ? (
+            <img
+              src={p.profilePhoto}
+              alt={p.fullName}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div
+              className={`w-full h-full ${avatarColor} flex items-center justify-center`}
+            >
+              <span className="text-sm font-bold text-white leading-none">
+                {initials}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-foreground leading-tight truncate">
+            {p.fullName}
+          </p>
+          {p.practiceArea && (
+            <span className="inline-flex items-center text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full mt-0.5">
+              {p.practiceArea}
+            </span>
+          )}
+          {(p.city || p.state) && (
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              {[p.city, p.state].filter(Boolean).join(", ")}
+            </p>
+          )}
+          {tags && tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Action */}
+        <div className="shrink-0 flex flex-col gap-2">{action}</div>
+      </div>
+    );
+  }
+
+  // ─── My Network sub-tab ───
+  function MyNetworkTab() {
+    return (
+      <div className="flex flex-col gap-3 px-3 py-3">
+        {networkAdvocates.length === 0 ? (
+          <div
+            data-ocid="network.empty_state"
+            className="flex flex-col items-center justify-center text-center py-16 gap-4"
+          >
+            <div className="w-20 h-20 rounded-full bg-primary/8 border border-primary/10 flex items-center justify-center">
+              <Network className="w-9 h-9 text-primary/40" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-foreground">
+                No connections yet
+              </p>
+              <p className="text-sm text-muted-foreground mt-1.5 max-w-[240px] leading-relaxed">
+                Explore the Suggested tab to start building your network.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
+              {networkAdvocates.length}{" "}
+              {networkAdvocates.length === 1 ? "Connection" : "Connections"}
+            </p>
+            {networkAdvocates.map(({ otherId, profile: p }, idx) => (
+              <AdvocateCard
+                key={otherId}
+                profile={p}
+                ocidIndex={idx + 1}
+                action={
+                  <button
+                    data-ocid={`network.message_button.${idx + 1}`}
+                    type="button"
+                    onClick={() => openChat(otherId)}
+                    className="flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    Message
+                  </button>
+                }
+              />
+            ))}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ─── Pending sub-tab ───
+  function PendingTab() {
+    return (
+      <div className="flex flex-col gap-4 px-3 py-3">
+        {/* Incoming */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
+            Incoming Requests ({incomingRequests.length})
+          </p>
+          {incomingRequests.length === 0 ? (
+            <div
+              data-ocid="network.incoming.empty_state"
+              className="bg-white rounded-xl border border-border p-4 text-center text-sm text-muted-foreground"
+            >
+              No pending requests
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {incomingRequests.map(({ conn, profile: p }, idx) => (
+                <AdvocateCard
+                  key={conn.id}
+                  profile={p}
+                  ocidIndex={idx + 1}
+                  action={
+                    <div className="flex flex-col gap-1.5">
+                      <button
+                        data-ocid={`network.accept_button.${idx + 1}`}
+                        type="button"
+                        onClick={() => {
+                          acceptConnection(conn.id, user.mobile);
+                          refresh();
+                          toast.success(
+                            `Connected with ${p?.fullName || "advocate"}!`,
+                          );
+                        }}
+                        className="flex items-center gap-1 text-xs font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        Accept
+                      </button>
+                      <button
+                        data-ocid={`network.reject_button.${idx + 1}`}
+                        type="button"
+                        onClick={() => {
+                          rejectConnection(conn.id);
+                          refresh();
+                          toast.info("Request declined.");
+                        }}
+                        className="flex items-center gap-1 text-xs font-semibold text-destructive bg-white hover:bg-destructive/5 border border-destructive/30 rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <UserX className="w-3.5 h-3.5" />
+                        Decline
+                      </button>
+                    </div>
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Outgoing */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
+            Sent Requests ({outgoingRequests.length})
+          </p>
+          {outgoingRequests.length === 0 ? (
+            <div
+              data-ocid="network.outgoing.empty_state"
+              className="bg-white rounded-xl border border-border p-4 text-center text-sm text-muted-foreground"
+            >
+              No sent requests
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {outgoingRequests.map(({ conn, profile: p }, idx) => (
+                <AdvocateCard
+                  key={conn.id}
+                  profile={p}
+                  ocidIndex={idx + 1}
+                  action={
+                    <button
+                      data-ocid={`network.cancel_button.${idx + 1}`}
+                      type="button"
+                      onClick={() => {
+                        cancelConnectionRequest(conn.id);
+                        refresh();
+                        toast.info("Request cancelled.");
+                      }}
+                      className="flex items-center gap-1 text-xs font-semibold text-muted-foreground bg-white hover:bg-muted/50 border border-border rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Cancel
+                    </button>
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Suggested sub-tab ───
+  function SuggestedTab() {
+    return (
+      <div className="flex flex-col gap-3 px-3 py-3">
+        {suggested.length === 0 ? (
+          <div
+            data-ocid="network.empty_state"
+            className="flex flex-col items-center justify-center text-center py-16 gap-4"
+          >
+            <div className="w-20 h-20 rounded-full bg-primary/8 border border-primary/10 flex items-center justify-center">
+              <UserPlus className="w-9 h-9 text-primary/40" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-foreground">
+                No suggestions at the moment
+              </p>
+              <p className="text-sm text-muted-foreground mt-1.5 max-w-[240px] leading-relaxed">
+                Use Find Advocates to discover more legal professionals.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">
+              Suggested Advocates
+            </p>
+            {suggested.map((p, idx) => {
+              const isSent = sentIds.has(p.mobile);
+              const tags = getMatchTags(myProfile, p);
+              return (
+                <AdvocateCard
+                  key={p.mobile}
+                  profile={p}
+                  ocidIndex={idx + 1}
+                  tags={tags}
+                  action={
+                    isSent ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-muted-foreground bg-muted/50 border border-border rounded-lg px-3 py-1.5">
+                        <Check className="w-3.5 h-3.5" />
+                        Pending
+                      </span>
+                    ) : (
+                      <button
+                        data-ocid={`network.connect_button.${idx + 1}`}
+                        type="button"
+                        onClick={() => {
+                          sendConnectionRequest(user.mobile, p.mobile);
+                          setSentIds((prev) => {
+                            const next = new Set(prev);
+                            next.add(p.mobile);
+                            return next;
+                          });
+                          toast.success(
+                            `Connection request sent to ${p.fullName}!`,
+                          );
+                        }}
+                        className="flex items-center gap-1 text-xs font-semibold text-white bg-primary hover:bg-primary/90 rounded-lg px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        Connect
+                      </button>
+                    )
+                  }
+                />
+              );
+            })}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-ocid="network.section"
+      className="flex flex-col min-h-full bg-[#f3f4f6]"
+    >
+      {/* Sub-tabs */}
+      <div className="px-3 pt-3 pb-0 bg-white border-b border-border sticky top-0 z-10">
+        <div className="flex gap-1">
+          <button
+            data-ocid="network.my_network_tab"
+            type="button"
+            onClick={() => setSubTab("my_network")}
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-t-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              subTab === "my_network"
+                ? "text-primary border-b-2 border-primary bg-primary/5"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            My Network ({networkAdvocates.length})
+          </button>
+          <button
+            data-ocid="network.pending_tab"
+            type="button"
+            onClick={() => setSubTab("pending")}
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-t-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring relative ${
+              subTab === "pending"
+                ? "text-primary border-b-2 border-primary bg-primary/5"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Pending
+            {pendingCount > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-destructive text-white text-[9px] font-bold px-0.5">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+          <button
+            data-ocid="network.suggested_tab"
+            type="button"
+            onClick={() => setSubTab("suggested")}
+            className={`flex-1 py-2.5 text-xs font-semibold rounded-t-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              subTab === "suggested"
+                ? "text-primary border-b-2 border-primary bg-primary/5"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Suggested
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {subTab === "my_network" && <MyNetworkTab />}
+        {subTab === "pending" && <PendingTab />}
+        {subTab === "suggested" && <SuggestedTab />}
+      </div>
     </div>
   );
 }
@@ -10178,6 +13967,773 @@ function getAvatarColorFromName(name: string): string {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+// ─── Legal Feed Tab (AppShell version — no own header) ───────────────────────
+
+function LegalFeedTab({
+  currentUser,
+  currentProfile,
+  onNavigateToFindAdvocates,
+}: {
+  currentUser: StoredUser;
+  currentProfile: StoredProfile | null;
+  onNavigateToFindAdvocates: () => void;
+}) {
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [userPosts, setUserPosts] = useState<UserPost[]>(() => loadUserPosts());
+  const [postText, setPostText] = useState("");
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [isPosting, setIsPosting] = useState(false);
+  const [commentsMap, setCommentsMap] = useState<
+    Record<
+      string,
+      Array<{ id: string; authorName: string; text: string; timeAgo: string }>
+    >
+  >({});
+  const [openCommentPostId, setOpenCommentPostId] = useState<string | null>(
+    null,
+  );
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>(
+    {},
+  );
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // Share to Chat state
+  const [shareSheetOpen, setShareSheetOpen] = useState(false);
+  const [sharePostText, setSharePostText] = useState<string>("");
+  const [sharePostAuthor, setSharePostAuthor] = useState<string>("");
+
+  type ShareContact = {
+    id: string;
+    name: string;
+    initials: string;
+    photo?: string;
+    role: string;
+  };
+
+  const shareContacts: ShareContact[] = useMemo(() => {
+    const contacts: ShareContact[] = [];
+    if (currentUser.role === "advocate") {
+      // Clients
+      const advData = loadAllAdvocateData().find(
+        (a) => a.userId === currentUser.mobile,
+      );
+      if (advData) {
+        const clients = getClientsForAdvocate(advData.referralCode);
+        for (const c of clients) {
+          const p = loadProfile(c.userId);
+          const name = p?.fullName || c.name || "Client";
+          const initials = name
+            .split(" ")
+            .map((w) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase();
+          contacts.push({
+            id: c.userId,
+            name,
+            initials,
+            photo: p?.profilePhoto,
+            role: "Client",
+          });
+        }
+      }
+      // Network connections (advocates)
+      const networkIds = getConnectedAdvocateIds(currentUser.mobile);
+      for (const otherId of networkIds) {
+        const p = loadProfile(otherId);
+        const name = p?.fullName || "Advocate";
+        const initials = name
+          .split(" ")
+          .map((w) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        contacts.push({
+          id: otherId,
+          name,
+          initials,
+          photo: p?.profilePhoto,
+          role: "Advocate",
+        });
+      }
+    } else {
+      // Client: connected advocate only
+      const clientData = loadAllClientData().find(
+        (c) => c.userId === currentUser.mobile,
+      );
+      if (clientData?.linkedAdvocateId) {
+        const advocate = loadAllAdvocateData().find(
+          (a) =>
+            a.referralCode.toUpperCase() ===
+            clientData.linkedAdvocateId!.toUpperCase(),
+        );
+        if (advocate) {
+          const p = loadProfile(advocate.userId);
+          const name = p?.fullName || advocate.name || "Advocate";
+          const initials = name
+            .split(" ")
+            .map((w) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase();
+          contacts.push({
+            id: advocate.userId,
+            name,
+            initials,
+            photo: p?.profilePhoto,
+            role: "Advocate",
+          });
+        }
+      }
+    }
+    return contacts;
+  }, [currentUser.mobile, currentUser.role]);
+
+  function handleShareToContact(contact: ShareContact) {
+    const convId = getConversationId(currentUser.mobile, contact.id);
+    const senderName =
+      currentProfile?.fullName ||
+      (currentUser.mobile === "google-demo" ? "Demo User" : "User");
+    const msgText = `📌 *Shared Post from ${sharePostAuthor}*\n\n${sharePostText}`;
+    const newMsg: StoredMessage = {
+      id: generateMsgId(),
+      conversationId: convId,
+      senderId: currentUser.mobile,
+      senderName,
+      senderRole: currentUser.role,
+      text: msgText,
+      timestamp: new Date().toISOString(),
+      seen: false,
+      delivered: false,
+    };
+    saveMessageToStorage(newMsg);
+    toast.success(`Shared with ${contact.name}`);
+    setShareSheetOpen(false);
+  }
+
+  const displayName =
+    currentProfile?.fullName ||
+    (currentUser.mobile === "google-demo" ? "Demo User" : "User");
+  const initials = displayName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const isAdvocate = currentUser.role === "advocate";
+
+  function toggleLike(postId: string) {
+    setLikedPosts((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) {
+        next.delete(postId);
+      } else {
+        next.add(postId);
+      }
+      return next;
+    });
+  }
+
+  function toggleComment(postId: string) {
+    setOpenCommentPostId((prev) => (prev === postId ? null : postId));
+  }
+
+  function handleCommentSubmit(postId: string) {
+    const text = (commentInputs[postId] || "").trim();
+    if (!text) return;
+    const newComment = {
+      id: `cmt_${Date.now()}`,
+      authorName: displayName,
+      text,
+      timeAgo: "Just now",
+    };
+    setCommentsMap((prev) => ({
+      ...prev,
+      [postId]: [...(prev[postId] ?? []), newComment],
+    }));
+    setCommentInputs((prev) => ({ ...prev, [postId]: "" }));
+  }
+
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result;
+      if (typeof result === "string") {
+        setPostImage(result);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function handleSubmitPost() {
+    const trimmedText = postText.trim();
+    if (!trimmedText) return;
+
+    setIsPosting(true);
+
+    const authorName = displayName;
+    const authorInitials = initials;
+    const authorAvatarColor = getAvatarColorFromName(authorName);
+
+    const newPost: UserPost = {
+      id: `user_post_${Date.now()}`,
+      authorName,
+      authorInitials,
+      authorAvatarColor,
+      authorPhoto: currentProfile?.profilePhoto || undefined,
+      practiceArea:
+        (currentProfile as { practiceArea?: string } | null)?.practiceArea ||
+        "Advocate",
+      text: trimmedText,
+      imageDataUrl: postImage || undefined,
+      timestamp: new Date().toISOString(),
+      likes: 0,
+      comments: 0,
+      shares: 0,
+    };
+
+    setUserPosts((prev) => {
+      const updated = [newPost, ...prev];
+      saveUserPosts(updated);
+      return updated;
+    });
+
+    setPostText("");
+    setPostImage(null);
+    setIsPosting(false);
+    toast.success("Post shared!");
+  }
+
+  // Combined feed: user posts first (newest), then demo posts
+  const allPosts = [...userPosts, ...DEMO_POSTS];
+
+  return (
+    <div
+      data-ocid="legal-feed.page"
+      className="flex flex-col min-h-0 bg-[#f3f4f6]"
+    >
+      <div className="px-3 pt-3 flex flex-col gap-3 pb-4">
+        {/* ── Find Advocates card ── */}
+        {isAdvocate ? (
+          <div
+            data-ocid="legal-feed.find_advocates.card"
+            className="bg-white rounded-xl border border-border shadow-sm p-4 flex items-center gap-3"
+          >
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground leading-tight">
+                Connect with Fellow Advocates
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+                Explore the network of legal professionals across India
+              </p>
+            </div>
+            <button
+              data-ocid="legal-feed.find_advocates.button"
+              type="button"
+              onClick={onNavigateToFindAdvocates}
+              className="shrink-0 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 transition-colors rounded-lg px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Explore
+            </button>
+          </div>
+        ) : (
+          <div
+            data-ocid="legal-feed.find_advocates.card"
+            className="bg-white rounded-xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="bg-gradient-to-r from-primary to-primary/80 px-4 py-3 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                <Search className="w-4 h-4 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white leading-tight">
+                  Find Advocates
+                </p>
+                <p className="text-[11px] text-white/80 leading-snug">
+                  Search and connect with trusted legal professionals
+                </p>
+              </div>
+              <button
+                data-ocid="legal-feed.find_advocates.button"
+                type="button"
+                onClick={onNavigateToFindAdvocates}
+                className="shrink-0 text-xs font-bold text-primary bg-white hover:bg-white/90 transition-colors rounded-lg px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Search Now
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Create Post card (Advocates only) ── */}
+        {isAdvocate && (
+          <div
+            data-ocid="legal-feed.create_post.card"
+            className="bg-white rounded-xl border border-border shadow-sm p-4"
+          >
+            <div className="flex items-start gap-3">
+              {/* User avatar */}
+              <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border shrink-0 mt-0.5">
+                {currentProfile?.profilePhoto ? (
+                  <img
+                    src={currentProfile.profilePhoto}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-xs font-bold text-primary leading-none">
+                      {initials}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Text input */}
+              <div className="flex-1 min-w-0">
+                <Textarea
+                  data-ocid="legal-feed.create_post.textarea"
+                  value={postText}
+                  onChange={(e) => setPostText(e.target.value)}
+                  placeholder="Share legal knowledge, case insights, or legal updates..."
+                  rows={3}
+                  className="w-full resize-none text-sm bg-muted/30 border-border rounded-lg focus:bg-white transition-colors placeholder:text-muted-foreground/70 min-h-[80px]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault();
+                      handleSubmitPost();
+                    }
+                  }}
+                />
+
+                {/* Image preview */}
+                {postImage && (
+                  <div
+                    data-ocid="legal-feed.create_post.image_preview"
+                    className="mt-2 relative inline-block"
+                  >
+                    <img
+                      src={postImage}
+                      alt="Selected attachment preview"
+                      className="w-16 h-16 rounded-lg object-cover border border-border"
+                    />
+                    <button
+                      data-ocid="legal-feed.create_post.remove_image.button"
+                      type="button"
+                      onClick={() => setPostImage(null)}
+                      aria-label="Remove image"
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground text-background flex items-center justify-center shadow-sm hover:bg-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Bottom action row */}
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button
+                    data-ocid="legal-feed.create_post.add_image.button"
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary border border-border rounded-lg px-3 py-1.5 hover:border-primary/40 hover:bg-primary/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    Add Image
+                  </button>
+
+                  <Button
+                    data-ocid="legal-feed.create_post.submit_button"
+                    type="button"
+                    size="sm"
+                    disabled={!postText.trim() || isPosting}
+                    onClick={handleSubmitPost}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    {isPosting ? "Posting..." : "Post"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+          </div>
+        )}
+
+        {/* ── Post cards ── */}
+        {allPosts.map((post, idx) => {
+          const isUserPost = "timestamp" in post;
+          const postId = post.id;
+          const isLiked = likedPosts.has(postId);
+          const likeCount = post.likes + (isLiked ? 1 : 0);
+          const timeLabel = isUserPost
+            ? formatTimeAgo((post as UserPost).timestamp)
+            : (post as DemoPost).timeAgo;
+          const postComments = commentsMap[postId] ?? [];
+          const commentCount = post.comments + postComments.length;
+          const isCommentOpen = openCommentPostId === postId;
+
+          return (
+            <div
+              key={postId}
+              data-ocid={
+                isUserPost
+                  ? `legal-feed.user_post.item.${idx + 1}`
+                  : `legal-feed.post.item.${idx + 1 - userPosts.length}`
+              }
+              className="bg-white rounded-xl border border-border shadow-sm overflow-hidden"
+            >
+              {/* Post header */}
+              <div className="flex items-start gap-3 p-4 pb-3">
+                {/* Author avatar */}
+                {isUserPost && (post as UserPost).authorPhoto ? (
+                  <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-border shrink-0 shadow-sm">
+                    <img
+                      src={(post as UserPost).authorPhoto}
+                      alt={post.authorName}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className={`w-11 h-11 rounded-full ${post.authorAvatarColor} flex items-center justify-center shrink-0 shadow-sm`}
+                  >
+                    <span className="text-sm font-bold text-white leading-none">
+                      {post.authorInitials}
+                    </span>
+                  </div>
+                )}
+
+                {/* Author info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-foreground leading-tight">
+                        {post.authorName}
+                      </p>
+                      <span className="inline-flex items-center text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full mt-0.5">
+                        {post.practiceArea}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">
+                      {timeLabel}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Post text */}
+              <div className="px-4 pb-3">
+                <p className="text-sm text-foreground leading-relaxed">
+                  {post.text}
+                </p>
+              </div>
+
+              {/* Post image */}
+              {isUserPost && (post as UserPost).imageDataUrl ? (
+                <div className="mx-4 mb-3 rounded-xl overflow-hidden max-h-64">
+                  <img
+                    src={(post as UserPost).imageDataUrl}
+                    alt="Attached media"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : !isUserPost && (post as DemoPost).hasImage ? (
+                <div className="mx-4 mb-3 bg-muted/40 rounded-xl h-44 flex flex-col items-center justify-center border border-border gap-2">
+                  <ImageIcon className="w-8 h-8 text-muted-foreground/50" />
+                  <span className="text-xs text-muted-foreground">Image</span>
+                </div>
+              ) : null}
+
+              {/* Engagement counts */}
+              <div className="px-4 pb-2 flex items-center gap-4">
+                <span className="text-[10px] text-muted-foreground">
+                  {likeCount} likes
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {commentCount} comments
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {post.shares} shares
+                </span>
+              </div>
+
+              {/* Divider */}
+              <div className="mx-4 h-px bg-border" />
+
+              {/* Action buttons */}
+              <div className="flex items-center px-2 py-1">
+                <button
+                  data-ocid={`legal-feed.like.button.${idx + 1}`}
+                  type="button"
+                  onClick={() => toggleLike(postId)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    isLiked
+                      ? "text-primary hover:bg-primary/5"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  }`}
+                  aria-label="Like"
+                  aria-pressed={isLiked}
+                >
+                  <ThumbsUp
+                    className={`w-4 h-4 ${isLiked ? "fill-primary" : ""}`}
+                  />
+                  Like
+                </button>
+                <button
+                  data-ocid={`legal-feed.comment.button.${idx + 1}`}
+                  type="button"
+                  onClick={() => toggleComment(postId)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    isCommentOpen
+                      ? "text-primary bg-primary/5"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  }`}
+                  aria-label="Comment"
+                  aria-expanded={isCommentOpen}
+                >
+                  <MessageCircle
+                    className={`w-4 h-4 ${isCommentOpen ? "fill-primary/20" : ""}`}
+                  />
+                  Comment{commentCount > 0 ? ` (${commentCount})` : ""}
+                </button>
+                <button
+                  data-ocid={`feed.share_button.${idx + 1}`}
+                  type="button"
+                  onClick={() => {
+                    setSharePostText(
+                      post.text.slice(0, 120) +
+                        (post.text.length > 120 ? "…" : ""),
+                    );
+                    setSharePostAuthor(post.authorName);
+                    setShareSheetOpen(true);
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Share"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </button>
+              </div>
+
+              {/* ── Comment panel ── */}
+              {isCommentOpen && (
+                <div
+                  data-ocid="legal-feed.comment_panel"
+                  className="border-t border-border bg-muted/20 px-4 py-3 flex flex-col gap-3"
+                >
+                  {/* Existing comments */}
+                  {postComments.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      {postComments.map((cmt, cIdx) => (
+                        <div
+                          key={cmt.id}
+                          data-ocid={`legal-feed.comment.item.${cIdx + 1}`}
+                          className="flex items-start gap-2"
+                        >
+                          <div
+                            className={`w-7 h-7 rounded-full ${getAvatarColorFromName(cmt.authorName)} flex items-center justify-center shrink-0`}
+                          >
+                            <span className="text-[10px] font-bold text-white leading-none">
+                              {cmt.authorName
+                                .split(" ")
+                                .map((w) => w[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0 bg-white rounded-xl px-3 py-2 border border-border shadow-sm">
+                            <p className="text-[11px] font-bold text-foreground leading-tight">
+                              {cmt.authorName}
+                            </p>
+                            <p className="text-xs text-foreground mt-0.5 leading-snug">
+                              {cmt.text}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              {cmt.timeAgo}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Comment input row */}
+                  <div className="flex items-start gap-2">
+                    {/* Current user avatar */}
+                    <div className="w-7 h-7 rounded-full overflow-hidden border border-border shrink-0 mt-0.5">
+                      {currentProfile?.profilePhoto ? (
+                        <img
+                          src={currentProfile.profilePhoto}
+                          alt={displayName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div
+                          className={`w-full h-full ${getAvatarColorFromName(displayName)} flex items-center justify-center`}
+                        >
+                          <span className="text-[9px] font-bold text-white leading-none">
+                            {initials}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 flex items-center gap-2">
+                      <input
+                        data-ocid="legal-feed.comment.input"
+                        type="text"
+                        value={commentInputs[postId] ?? ""}
+                        onChange={(e) =>
+                          setCommentInputs((prev) => ({
+                            ...prev,
+                            [postId]: e.target.value,
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleCommentSubmit(postId);
+                          }
+                        }}
+                        placeholder="Write a comment…"
+                        className="flex-1 text-xs bg-white border border-border rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent placeholder:text-muted-foreground/60 transition-colors"
+                      />
+                      <button
+                        data-ocid="legal-feed.comment.submit_button"
+                        type="button"
+                        onClick={() => handleCommentSubmit(postId)}
+                        disabled={!(commentInputs[postId] ?? "").trim()}
+                        className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Post comment"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Footer */}
+        <div className="text-center text-[11px] text-muted-foreground mt-2 pb-2">
+          <p>
+            © {new Date().getFullYear()}{" "}
+            <a
+              href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-foreground transition-colors"
+            >
+              Built with love using caffeine.ai
+            </a>
+          </p>
+        </div>
+      </div>
+
+      {/* ── Share to Chat Sheet ── */}
+      <Sheet
+        open={shareSheetOpen}
+        onOpenChange={(v) => {
+          if (!v) setShareSheetOpen(false);
+        }}
+      >
+        <SheetContent
+          data-ocid="feed.share_sheet"
+          side="bottom"
+          className="rounded-t-2xl max-h-[70vh] flex flex-col p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
+            <SheetTitle className="text-base font-bold text-foreground">
+              Share to Chat
+            </SheetTitle>
+            {sharePostText && (
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">
+                {sharePostText}
+              </p>
+            )}
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-5 py-3">
+            {shareContacts.length === 0 ? (
+              <div
+                data-ocid="feed.share_sheet.empty_state"
+                className="flex flex-col items-center justify-center text-center py-10 gap-3"
+              >
+                <MessageCircle className="w-8 h-8 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">
+                  No contacts to share with yet.
+                  <br />
+                  Connect with advocates or clients first.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {shareContacts.map((contact, cIdx) => (
+                  <button
+                    key={contact.id}
+                    data-ocid={`feed.share_contact.${cIdx + 1}`}
+                    type="button"
+                    onClick={() => handleShareToContact(contact)}
+                    className="flex items-center gap-3 w-full py-3 px-2 rounded-xl hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-left"
+                  >
+                    <div className="w-11 h-11 rounded-full overflow-hidden shrink-0 border-2 border-border">
+                      {contact.photo ? (
+                        <img
+                          src={contact.photo}
+                          alt={contact.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div
+                          className={`w-full h-full ${getAvatarColorFromName(contact.name)} flex items-center justify-center`}
+                        >
+                          <span className="text-sm font-bold text-white leading-none">
+                            {contact.initials}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {contact.name}
+                      </p>
+                      <span
+                        className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full mt-0.5 ${
+                          contact.role === "Advocate"
+                            ? "text-primary bg-primary/10"
+                            : "text-emerald-700 bg-emerald-50"
+                        }`}
+                      >
+                        {contact.role}
+                      </span>
+                    </div>
+                    <Send className="w-4 h-4 text-primary shrink-0" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
 }
 
 function LegalFeedScreen({
@@ -10608,6 +15164,1601 @@ function LegalFeedScreen({
   );
 }
 
+// ─── Profile Tab (AppShell version — LinkedIn-style profile) ─────────────────
+
+function ProfileTab({ user }: { user: StoredUser }) {
+  const isAdvocate = user.role === "advocate";
+
+  const [profileState, setProfileState] = useState<StoredProfile | null>(() =>
+    loadProfile(user.mobile),
+  );
+
+  // Edit sheet state
+  const [editSheetOpen, setEditSheetOpen] = useState(false);
+  const [editBio, setEditBio] = useState("");
+  const [editContactEmail, setEditContactEmail] = useState("");
+  const [editPracticeArea, setEditPracticeArea] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Photo sheets
+  const [profilePhotoSheetOpen, setProfilePhotoSheetOpen] = useState(false);
+  const [coverPhotoSheetOpen, setCoverPhotoSheetOpen] = useState(false);
+  const [viewPhotoDialog, setViewPhotoDialog] = useState<{
+    open: boolean;
+    url: string;
+    alt: string;
+  }>({ open: false, url: "", alt: "" });
+  const [changingPhoto, setChangingPhoto] = useState<
+    "profile" | "cover" | null
+  >(null);
+  const [newProfilePhotoSrc, setNewProfilePhotoSrc] = useState<string | null>(
+    null,
+  );
+
+  const profilePhotoFileRef = useRef<HTMLInputElement>(null);
+  const coverPhotoFileRef = useRef<HTMLInputElement>(null);
+
+  const profile = profileState;
+
+  // Advocate referral & clients
+  const advocateData = useMemo(
+    () =>
+      isAdvocate
+        ? (loadAllAdvocateData().find((a) => a.userId === user.mobile) ?? null)
+        : null,
+    [user.mobile, isAdvocate],
+  );
+  const referralCode = advocateData?.referralCode ?? null;
+  const connectedClients = useMemo(
+    () => (referralCode ? getClientsForAdvocate(referralCode) : []),
+    [referralCode],
+  );
+
+  // Client connected advocate
+  const clientData = useMemo(
+    () =>
+      !isAdvocate
+        ? (loadAllClientData().find((c) => c.userId === user.mobile) ?? null)
+        : null,
+    [user.mobile, isAdvocate],
+  );
+  const connectedAdvocate = clientData?.linkedAdvocateId
+    ? findAdvocateByCode(clientData.linkedAdvocateId)
+    : null;
+
+  // Stats
+  const allCases = useMemo(() => loadCases(), []);
+  const statTotalClients = isAdvocate ? connectedClients.length : 0;
+  const statActiveCases = isAdvocate
+    ? allCases.filter(
+        (c) => c.advocateId === user.mobile && c.caseStatus === "Active",
+      ).length
+    : allCases.filter(
+        (c) => c.clientId === user.mobile && c.caseStatus === "Active",
+      ).length;
+  const statClosedCases = isAdvocate
+    ? allCases.filter(
+        (c) => c.advocateId === user.mobile && c.caseStatus === "Closed",
+      ).length
+    : allCases.filter(
+        (c) => c.clientId === user.mobile && c.caseStatus === "Closed",
+      ).length;
+  const statUpcomingHearings = isAdvocate
+    ? getUpcomingHearings(user.mobile).length
+    : getUpcomingHearingsForClient(user.mobile).length;
+
+  const displayName = profile?.fullName || "User";
+  const initials = displayName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  function openEditSheet() {
+    setEditBio(profile?.bio ?? "");
+    setEditContactEmail(profile?.contactEmail ?? "");
+    setEditPracticeArea(profile?.practiceArea ?? "");
+    setEditSheetOpen(true);
+  }
+
+  function handleSaveProfile() {
+    if (!profile) return;
+    setIsSaving(true);
+    const updated: StoredProfile = {
+      ...profile,
+      bio: editBio.trim() || undefined,
+      contactEmail: editContactEmail.trim(),
+      practiceArea: isAdvocate
+        ? editPracticeArea || profile.practiceArea
+        : profile.practiceArea,
+    };
+    saveProfile(updated);
+    setProfileState(updated);
+    setEditSheetOpen(false);
+    setIsSaving(false);
+    toast.success("Profile updated successfully");
+  }
+
+  function handleCopyCode() {
+    if (!referralCode) return;
+    navigator.clipboard
+      .writeText(referralCode)
+      .then(() => toast.success("Referral code copied!"))
+      .catch(() => toast.error("Could not copy to clipboard."));
+  }
+
+  // ── Photo handlers ────────────────────────────────────────────────────────
+
+  function handleProfilePhotoFileChange(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setNewProfilePhotoSrc(ev.target?.result as string);
+      setChangingPhoto("profile");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function handleCoverPhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (!profile) return;
+      const updated: StoredProfile = {
+        ...profile,
+        coverPhoto: ev.target?.result as string,
+      };
+      saveProfile(updated);
+      setProfileState(updated);
+      toast.success("Cover photo updated");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function handleRemoveProfilePhoto() {
+    if (!profile) return;
+    const updated: StoredProfile = { ...profile, profilePhoto: undefined };
+    saveProfile(updated);
+    setProfileState(updated);
+    toast.success("Profile photo removed");
+  }
+
+  function handleRemoveCoverPhoto() {
+    if (!profile) return;
+    const updated: StoredProfile = { ...profile, coverPhoto: undefined };
+    saveProfile(updated);
+    setProfileState(updated);
+    toast.success("Cover photo removed");
+  }
+
+  function handleProfileCropDone(dataUrl: string) {
+    if (!profile) return;
+    if (dataUrl) {
+      const updated: StoredProfile = { ...profile, profilePhoto: dataUrl };
+      saveProfile(updated);
+      setProfileState(updated);
+      toast.success("Profile photo updated");
+    }
+    setChangingPhoto(null);
+    setNewProfilePhotoSrc(null);
+  }
+
+  return (
+    <div
+      data-ocid="profile_tab.section"
+      className="flex flex-col bg-background pb-4"
+    >
+      {/* Hidden file inputs */}
+      <input
+        ref={profilePhotoFileRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={handleProfilePhotoFileChange}
+      />
+      <input
+        ref={coverPhotoFileRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={handleCoverPhotoFileChange}
+      />
+
+      {/* ── Hero Section ──────────────────────────────────────────────────── */}
+      <div className="relative">
+        {/* Cover photo */}
+        <div
+          className="relative w-full overflow-hidden shrink-0"
+          style={{ height: 200 }}
+        >
+          {isAdvocate ? (
+            profile?.coverPhoto ? (
+              <img
+                src={profile.coverPhoto}
+                alt="Cover"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+                <Briefcase className="w-16 h-16 text-white/20" />
+              </div>
+            )
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-emerald-500/70 to-emerald-700/60 flex items-center justify-center">
+              <User className="w-16 h-16 text-white/20" />
+            </div>
+          )}
+          {/* Cover photo tap target for advocates */}
+          {isAdvocate && (
+            <>
+              <button
+                data-ocid="profile_tab.cover_photo.button"
+                type="button"
+                onClick={() => setCoverPhotoSheetOpen(true)}
+                className="absolute inset-0 w-full h-full focus-visible:outline-none"
+                aria-label="Cover photo options"
+              />
+              <div className="absolute bottom-3 right-3 pointer-events-none w-8 h-8 rounded-full bg-black/50 flex items-center justify-center">
+                <Camera className="w-4 h-4 text-white" />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Profile photo — straddles cover/content boundary */}
+        <div className="flex flex-col items-center px-5">
+          <div className="relative -mt-[60px] z-10">
+            <button
+              data-ocid="profile_tab.profile_photo.button"
+              type="button"
+              onClick={() => setProfilePhotoSheetOpen(true)}
+              className="w-[120px] h-[120px] rounded-full border-4 border-white shadow-lg bg-white overflow-hidden block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label="Profile photo options"
+            >
+              {profile?.profilePhoto ? (
+                <img
+                  src={profile.profilePhoto}
+                  alt={displayName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div
+                  className={`w-full h-full flex items-center justify-center ${isAdvocate ? "bg-primary/10" : "bg-emerald-50"}`}
+                >
+                  <span
+                    className={`text-2xl font-bold ${isAdvocate ? "text-primary" : "text-emerald-600"}`}
+                  >
+                    {initials}
+                  </span>
+                </div>
+              )}
+            </button>
+            {/* Camera badge */}
+            <div
+              className={`absolute bottom-1 right-1 w-7 h-7 rounded-full flex items-center justify-center border-2 border-white pointer-events-none ${isAdvocate ? "bg-primary" : "bg-emerald-600"}`}
+            >
+              <Camera className="w-3 h-3 text-white" />
+            </div>
+          </div>
+
+          {/* Name */}
+          <h1 className="mt-3 text-xl font-bold text-foreground tracking-tight text-center">
+            {displayName}
+          </h1>
+
+          {/* Practice area badge (advocate only) */}
+          {isAdvocate && profile?.practiceArea && (
+            <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 px-3 py-1 rounded-full">
+              {profile.practiceArea}
+            </span>
+          )}
+
+          {/* Location */}
+          {(profile?.city || profile?.state) && (
+            <div className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Scale className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {[profile?.city, profile?.state].filter(Boolean).join(", ")}
+              </span>
+            </div>
+          )}
+
+          {/* Court name (advocate) */}
+          {isAdvocate && profile?.courtName && (
+            <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Building2 className="w-3.5 h-3.5 shrink-0" />
+              <span>{profile.courtName}</span>
+            </div>
+          )}
+
+          {/* Years experience (advocate) */}
+          {isAdvocate && profile?.yearsExp && (
+            <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Briefcase className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {profile.yearsExp}{" "}
+                {Number(profile.yearsExp) === 1 ? "year" : "years"} of
+                experience
+              </span>
+            </div>
+          )}
+
+          {/* Bio */}
+          {profile?.bio && (
+            <p className="mt-3 text-sm text-foreground/80 text-center leading-relaxed max-w-xs">
+              {profile.bio}
+            </p>
+          )}
+
+          {/* Edit Profile button */}
+          <button
+            data-ocid="profile_tab.edit.open_modal_button"
+            type="button"
+            onClick={openEditSheet}
+            className="mt-4 w-full flex items-center justify-center gap-2 h-11 rounded-xl border-2 border-primary text-primary text-sm font-semibold hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Pencil className="w-4 h-4" />
+            Edit Profile
+          </button>
+        </div>
+      </div>
+
+      {/* ── Statistics Cards ──────────────────────────────────────────────── */}
+      <div className="px-5 mt-5">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Overview
+        </h2>
+        <div className="grid grid-cols-2 gap-3">
+          {/* Total Clients */}
+          <div
+            data-ocid="profile_tab.stat.total_clients"
+            className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-1"
+          >
+            <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center mb-1">
+              <Users className="w-4 h-4 text-primary" />
+            </div>
+            <span className="text-2xl font-bold text-foreground leading-none">
+              {isAdvocate ? statTotalClients : "—"}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium">
+              Total Clients
+            </span>
+          </div>
+
+          {/* Active Cases */}
+          <div
+            data-ocid="profile_tab.stat.active_cases"
+            className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-1"
+          >
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center mb-1">
+              <Briefcase className="w-4 h-4 text-emerald-600" />
+            </div>
+            <span className="text-2xl font-bold text-foreground leading-none">
+              {statActiveCases}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium">
+              Active Cases
+            </span>
+          </div>
+
+          {/* Closed Cases */}
+          <div
+            data-ocid="profile_tab.stat.closed_cases"
+            className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-1"
+          >
+            <div className="w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center mb-1">
+              <Archive className="w-4 h-4 text-slate-500" />
+            </div>
+            <span className="text-2xl font-bold text-foreground leading-none">
+              {statClosedCases}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium">
+              Closed Cases
+            </span>
+          </div>
+
+          {/* Upcoming Hearings */}
+          <div
+            data-ocid="profile_tab.stat.upcoming_hearings"
+            className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-1"
+          >
+            <div className="w-8 h-8 rounded-xl bg-amber-50 flex items-center justify-center mb-1">
+              <CalendarDays className="w-4 h-4 text-amber-600" />
+            </div>
+            <span className="text-2xl font-bold text-foreground leading-none">
+              {statUpcomingHearings}
+            </span>
+            <span className="text-xs text-muted-foreground font-medium">
+              Upcoming Hearings
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Profile Sections ──────────────────────────────────────────────── */}
+      <div className="px-5 mt-5 flex flex-col gap-4">
+        {/* Contact Information */}
+        <div
+          data-ocid="profile_tab.contact.section"
+          className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+        >
+          <div className="px-4 py-3 border-b border-border">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Contact Information
+            </p>
+          </div>
+          <div className="divide-y divide-border">
+            {profile?.contactEmail && (
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center shrink-0">
+                  <Mail className="w-4 h-4 text-primary" />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
+                    Email
+                  </span>
+                  <span className="text-sm font-medium text-foreground truncate">
+                    {profile.contactEmail}
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-3 px-4 py-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/5 flex items-center justify-center shrink-0">
+                <Phone className="w-4 h-4 text-primary" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
+                  Mobile
+                </span>
+                <span className="text-sm font-medium text-foreground">
+                  {user.mobile.startsWith("+")
+                    ? user.mobile
+                    : `+91 ${user.mobile}`}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Practice Areas (advocate only) */}
+        {isAdvocate && (
+          <div
+            data-ocid="profile_tab.practice.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Practice Areas
+              </p>
+            </div>
+            <div className="px-4 py-3">
+              {profile?.practiceArea ? (
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary bg-primary/10 border border-primary/20 px-4 py-2 rounded-full">
+                  <Scale className="w-3.5 h-3.5" />
+                  {profile.practiceArea}
+                </span>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  No practice area set
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Court Details (advocate only) */}
+        {isAdvocate && (
+          <div
+            data-ocid="profile_tab.court.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Court Details
+              </p>
+            </div>
+            <div className="divide-y divide-border">
+              {profile?.courtName && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    Court Name
+                  </span>
+                  <span className="text-sm font-semibold text-foreground text-right max-w-[60%]">
+                    {profile.courtName}
+                  </span>
+                </div>
+              )}
+              {profile?.barCouncilNumber && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    Bar Council No.
+                  </span>
+                  <span className="text-sm font-semibold text-foreground font-mono">
+                    {profile.barCouncilNumber}
+                  </span>
+                </div>
+              )}
+              {profile?.state && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    State
+                  </span>
+                  <span className="text-sm font-semibold text-foreground">
+                    {profile.state}
+                  </span>
+                </div>
+              )}
+              {profile?.city && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    City / District
+                  </span>
+                  <span className="text-sm font-semibold text-foreground">
+                    {profile.city}
+                  </span>
+                </div>
+              )}
+              {!profile?.courtName &&
+                !profile?.barCouncilNumber &&
+                !profile?.state &&
+                !profile?.city && (
+                  <div className="px-4 py-3">
+                    <p className="text-sm text-muted-foreground italic">
+                      No court details available
+                    </p>
+                  </div>
+                )}
+            </div>
+          </div>
+        )}
+
+        {/* Referral Code (advocate only) */}
+        {isAdvocate && referralCode && (
+          <div className="bg-gradient-to-br from-primary/5 to-primary/10 rounded-2xl border border-primary/20 p-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Your Referral Code
+            </p>
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-2xl font-bold text-primary tracking-widest">
+                {referralCode}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                className="flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-2 rounded-xl hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
+                aria-label="Copy referral code"
+              >
+                <ClipboardCopy className="w-3.5 h-3.5" />
+                Copy
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Share this code with your clients so they can connect with you.
+            </p>
+          </div>
+        )}
+
+        {/* Connected Clients (advocate only) */}
+        {isAdvocate && (
+          <div
+            data-ocid="profile_tab.clients.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Connected Clients ({connectedClients.length})
+              </p>
+            </div>
+            {connectedClients.length === 0 ? (
+              <div
+                data-ocid="profile_tab.clients.empty_state"
+                className="px-4 py-8 flex flex-col items-center text-center"
+              >
+                <div className="w-12 h-12 rounded-full bg-muted/60 flex items-center justify-center mb-3">
+                  <Users className="w-6 h-6 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium text-foreground">
+                  No clients connected yet.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-[200px] leading-relaxed">
+                  Share your referral code with your clients to connect.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {connectedClients.slice(0, 5).map((client, idx) => {
+                  const clientProfile = loadProfile(client.userId);
+                  const clientName =
+                    clientProfile?.fullName || client.name || "Client";
+                  const clientInitials = clientName
+                    .split(" ")
+                    .map((w: string) => w[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase();
+                  const location = [clientProfile?.city, clientProfile?.state]
+                    .filter(Boolean)
+                    .join(", ");
+                  return (
+                    <div
+                      key={client.userId}
+                      data-ocid={`profile_tab.clients.item.${idx + 1}`}
+                      className="flex items-center gap-3 px-4 py-3"
+                    >
+                      <div className="w-10 h-10 rounded-full border-2 border-border overflow-hidden shrink-0 bg-primary/10 flex items-center justify-center">
+                        {clientProfile?.profilePhoto ? (
+                          <img
+                            src={clientProfile.profilePhoto}
+                            alt={clientName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-xs font-bold text-primary">
+                            {clientInitials}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate">
+                          {clientName}
+                        </p>
+                        {location && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {location}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {connectedClients.length > 5 && (
+                  <div className="px-4 py-3 text-center">
+                    <span className="text-xs text-primary font-medium">
+                      +{connectedClients.length - 5} more clients
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Your Advocate (client only) */}
+        {!isAdvocate && (
+          <div
+            data-ocid="profile_tab.clients.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Your Advocate
+              </p>
+            </div>
+            {connectedAdvocate ? (
+              (() => {
+                const advProfile = loadProfile(connectedAdvocate.userId);
+                const advInitials = connectedAdvocate.name
+                  .split(" ")
+                  .map((w) => w[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase();
+                const advLocation = [advProfile?.city, advProfile?.state]
+                  .filter(Boolean)
+                  .join(", ");
+                return (
+                  <div className="px-4 py-4 flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full border-2 border-border overflow-hidden shrink-0 bg-primary/10 flex items-center justify-center">
+                      {advProfile?.profilePhoto ? (
+                        <img
+                          src={advProfile.profilePhoto}
+                          alt={connectedAdvocate.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-bold text-primary">
+                          {advInitials}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">
+                        {connectedAdvocate.name}
+                      </p>
+                      {advProfile?.practiceArea && (
+                        <p className="text-xs text-primary font-medium">
+                          {advProfile.practiceArea}
+                        </p>
+                      )}
+                      {advLocation && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {advLocation}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="px-4 py-6 text-center">
+                <p className="text-sm text-muted-foreground">
+                  No advocate connected yet.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter an advocate&apos;s referral code to connect.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Edit Profile Sheet ────────────────────────────────────────────── */}
+      <Sheet
+        open={editSheetOpen}
+        onOpenChange={(v) => !v && setEditSheetOpen(false)}
+      >
+        <SheetContent
+          data-ocid="profile_tab.edit.sheet"
+          side="bottom"
+          className="rounded-t-2xl max-h-[90vh] overflow-y-auto px-0 pb-safe"
+        >
+          <SheetHeader className="px-5 pb-3 border-b border-border sticky top-0 bg-background z-10">
+            <SheetTitle className="text-base font-bold text-foreground">
+              Edit Profile
+            </SheetTitle>
+          </SheetHeader>
+
+          <div className="px-5 py-4 flex flex-col gap-4">
+            {/* Profile Photo */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                Profile Photo
+              </Label>
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full border-2 border-border overflow-hidden bg-primary/10 flex items-center justify-center shrink-0">
+                  {profile?.profilePhoto ? (
+                    <img
+                      src={profile.profilePhoto}
+                      alt={displayName}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-base font-bold text-primary">
+                      {initials}
+                    </span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => profilePhotoFileRef.current?.click()}
+                  className="rounded-xl text-xs font-semibold"
+                >
+                  <Camera className="w-3.5 h-3.5 mr-1.5" />
+                  Change Photo
+                </Button>
+              </div>
+            </div>
+
+            {/* Cover Photo (advocate only) */}
+            {isAdvocate && (
+              <div>
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                  Cover Photo
+                </Label>
+                <div
+                  className="relative w-full rounded-xl overflow-hidden bg-gradient-to-br from-primary/30 to-primary/10 border border-border"
+                  style={{ height: 80 }}
+                >
+                  {profile?.coverPhoto && (
+                    <img
+                      src={profile.coverPhoto}
+                      alt="Cover"
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => coverPhotoFileRef.current?.click()}
+                    className="absolute inset-0 flex items-center justify-center gap-2 text-xs font-semibold text-white bg-black/30 hover:bg-black/40 transition-colors focus-visible:outline-none"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Change Cover Photo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Bio */}
+            <div>
+              <Label
+                htmlFor="edit-bio"
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block"
+              >
+                Bio
+              </Label>
+              <Textarea
+                data-ocid="profile_tab.edit.bio.textarea"
+                id="edit-bio"
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                placeholder="Write a brief professional bio..."
+                rows={3}
+                className="rounded-xl text-sm resize-none"
+              />
+            </div>
+
+            {/* Contact Email */}
+            <div>
+              <Label
+                htmlFor="edit-email"
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block"
+              >
+                Contact Email
+              </Label>
+              <Input
+                data-ocid="profile_tab.edit.email.input"
+                id="edit-email"
+                type="email"
+                value={editContactEmail}
+                onChange={(e) => setEditContactEmail(e.target.value)}
+                placeholder="your@email.com"
+                className="rounded-xl text-sm h-11"
+              />
+            </div>
+
+            {/* Practice Area (advocate only) */}
+            {isAdvocate && (
+              <div>
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
+                  Practice Area
+                </Label>
+                <Select
+                  value={editPracticeArea}
+                  onValueChange={setEditPracticeArea}
+                >
+                  <SelectTrigger
+                    data-ocid="profile_tab.edit.practice.select"
+                    className="rounded-xl h-11 text-sm"
+                  >
+                    <SelectValue placeholder="Select practice area" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRACTICE_AREAS.map((area) => (
+                      <SelectItem key={area} value={area}>
+                        {area}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Save button */}
+            <Button
+              data-ocid="profile_tab.edit.save_button"
+              type="button"
+              onClick={handleSaveProfile}
+              disabled={isSaving}
+              className="w-full h-12 rounded-xl text-sm font-bold mt-2"
+            >
+              {isSaving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Save Changes"
+              )}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Photo Options Sheets ──────────────────────────────────────────── */}
+      <PhotoOptionsSheet
+        open={profilePhotoSheetOpen}
+        onClose={() => setProfilePhotoSheetOpen(false)}
+        photoType="profile"
+        currentPhoto={profile?.profilePhoto}
+        onView={() =>
+          setViewPhotoDialog({
+            open: true,
+            url: profile?.profilePhoto ?? "",
+            alt: displayName,
+          })
+        }
+        onChange={() => profilePhotoFileRef.current?.click()}
+        onRemove={handleRemoveProfilePhoto}
+      />
+
+      {isAdvocate && (
+        <PhotoOptionsSheet
+          open={coverPhotoSheetOpen}
+          onClose={() => setCoverPhotoSheetOpen(false)}
+          photoType="cover"
+          currentPhoto={profile?.coverPhoto}
+          onView={() =>
+            setViewPhotoDialog({
+              open: true,
+              url: profile?.coverPhoto ?? "",
+              alt: "Cover Photo",
+            })
+          }
+          onChange={() => coverPhotoFileRef.current?.click()}
+          onRemove={handleRemoveCoverPhoto}
+        />
+      )}
+
+      {/* View Photo Dialog */}
+      {viewPhotoDialog.open && viewPhotoDialog.url && (
+        <ViewPhotoDialog
+          open={viewPhotoDialog.open}
+          onClose={() => setViewPhotoDialog({ open: false, url: "", alt: "" })}
+          photoUrl={viewPhotoDialog.url}
+          altText={viewPhotoDialog.alt}
+        />
+      )}
+
+      {/* Profile Photo Crop Dialog */}
+      <Dialog
+        open={changingPhoto === "profile"}
+        onOpenChange={(v) => {
+          if (!v) {
+            setChangingPhoto(null);
+            setNewProfilePhotoSrc(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm w-full p-5 rounded-2xl">
+          <div className="mb-4">
+            <h2 className="text-base font-bold text-foreground">
+              Change Profile Photo
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Crop and position your photo
+            </p>
+          </div>
+          <ProfilePhotoCropper
+            onCropped={handleProfileCropDone}
+            croppedUrl={null}
+            initialSrc={newProfilePhotoSrc}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── My Clients Tab (AppShell version — no own page header) ──────────────────
+
+function MyClientsTab({ user }: { user: StoredUser }) {
+  if (user.role !== "advocate") return null;
+
+  const advocateData =
+    loadAllAdvocateData().find((a) => a.userId === user.mobile) ?? null;
+  const referralCode = advocateData?.referralCode ?? null;
+  const clients = referralCode ? getClientsForAdvocate(referralCode) : [];
+
+  return (
+    <div
+      data-ocid="clients_tab.section"
+      className="flex flex-col bg-background pb-4"
+    >
+      {/* Header */}
+      <div className="px-5 pt-4 pb-3">
+        <h1 className="text-lg font-bold text-foreground">
+          My Clients ({clients.length})
+        </h1>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Clients connected via your referral code
+        </p>
+      </div>
+
+      {/* Client list */}
+      <div className="px-5">
+        {clients.length === 0 ? (
+          <div
+            data-ocid="clients_tab.empty_state"
+            className="flex flex-col items-center text-center py-12"
+          >
+            <div className="w-20 h-20 rounded-full bg-emerald-50 flex items-center justify-center mb-4">
+              <Users className="w-9 h-9 text-emerald-300" />
+            </div>
+            <p className="text-base font-semibold text-foreground">
+              No clients connected yet.
+            </p>
+            <p className="text-sm text-muted-foreground mt-2 max-w-[260px] leading-relaxed">
+              Share your referral code with your clients to connect.
+            </p>
+            {referralCode && (
+              <div className="mt-5 bg-primary/5 border border-primary/20 rounded-xl px-5 py-3">
+                <p className="text-xs text-muted-foreground mb-1">
+                  Your referral code
+                </p>
+                <p className="font-mono text-lg font-bold text-primary tracking-widest">
+                  {referralCode}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {clients.map((client, idx) => {
+              const clientProfile = loadProfile(client.userId);
+              const clientName =
+                clientProfile?.fullName || client.name || "Client";
+              const clientInitials = clientName
+                .split(" ")
+                .map((w: string) => w[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+              const location = [clientProfile?.city, clientProfile?.state]
+                .filter(Boolean)
+                .join(", ");
+              const mobileDisplay = client.userId.startsWith("+")
+                ? client.userId
+                : `+91 ${client.userId}`;
+
+              return (
+                <div
+                  key={client.userId}
+                  data-ocid={`clients_tab.item.${idx + 1}`}
+                  className="bg-white rounded-2xl border border-border shadow-sm p-4 flex items-center gap-3"
+                >
+                  <div className="w-12 h-12 rounded-full border-2 border-border overflow-hidden shrink-0 bg-primary/10 flex items-center justify-center">
+                    {clientProfile?.profilePhoto ? (
+                      <img
+                        src={clientProfile.profilePhoto}
+                        alt={clientName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-sm font-bold text-primary">
+                        {clientInitials}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">
+                      {clientName}
+                    </p>
+                    {location && (
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                        {location}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {mobileDisplay}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Find Advocates Tab (AppShell version — no own page header) ──────────────
+
+function FindAdvocatesTab({ user }: { user: StoredUser }) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterPracticeArea, setFilterPracticeArea] = useState("all");
+  const [filterCity, setFilterCity] = useState("");
+  const [filterCourt, setFilterCourt] = useState("");
+  const [filterExpRange, setFilterExpRange] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const allAdvocates = useMemo(() => {
+    const allAdv = loadAllAdvocateData();
+    const results: Array<{ advData: AdvocateData; profile: StoredProfile }> =
+      [];
+    for (const adv of allAdv) {
+      if (adv.userId === user.mobile) continue;
+      const profile = loadProfile(adv.userId);
+      if (!profile) continue;
+      results.push({ advData: adv, profile });
+    }
+    return results;
+  }, [user.mobile]);
+
+  const clientData =
+    user.role === "client"
+      ? (loadAllClientData().find((c) => c.userId === user.mobile) ?? null)
+      : null;
+
+  function isConnected(advData: AdvocateData): boolean {
+    if (!clientData?.linkedAdvocateId) return false;
+    return (
+      clientData.linkedAdvocateId.toUpperCase() ===
+      advData.referralCode.toUpperCase()
+    );
+  }
+
+  const EXPERIENCE_RANGES_LOCAL = [
+    { label: "0-5 years", min: 0, max: 5 },
+    { label: "5-10 years", min: 5, max: 10 },
+    { label: "10+ years", min: 10, max: 999 },
+  ];
+
+  const filtered = useMemo(() => {
+    return allAdvocates.filter(({ advData: _adv, profile }) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (q) {
+        const nameMatch = profile.fullName.toLowerCase().includes(q);
+        const cityMatch = (profile.city || "").toLowerCase().includes(q);
+        const courtMatch = (profile.courtName || "").toLowerCase().includes(q);
+        const practiceMatch = (profile.practiceArea || "")
+          .toLowerCase()
+          .includes(q);
+        if (!nameMatch && !cityMatch && !courtMatch && !practiceMatch)
+          return false;
+      }
+      if (
+        filterPracticeArea !== "all" &&
+        profile.practiceArea !== filterPracticeArea
+      )
+        return false;
+      if (
+        filterCity.trim() &&
+        !(profile.city || "")
+          .toLowerCase()
+          .includes(filterCity.toLowerCase().trim())
+      )
+        return false;
+      if (
+        filterCourt.trim() &&
+        !(profile.courtName || "")
+          .toLowerCase()
+          .includes(filterCourt.toLowerCase().trim())
+      )
+        return false;
+      if (filterExpRange !== "all") {
+        const range = EXPERIENCE_RANGES_LOCAL.find(
+          (r) => r.label === filterExpRange,
+        );
+        if (range) {
+          const exp = Number(profile.yearsExp) || 0;
+          if (exp < range.min || exp > range.max) return false;
+        }
+      }
+      return true;
+    });
+  }, [
+    allAdvocates,
+    searchQuery,
+    filterPracticeArea,
+    filterCity,
+    filterCourt,
+    filterExpRange,
+  ]);
+
+  const activeFilterCount = [
+    filterPracticeArea !== "all",
+    filterCity.trim() !== "",
+    filterCourt.trim() !== "",
+    filterExpRange !== "all",
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    setFilterPracticeArea("all");
+    setFilterCity("");
+    setFilterCourt("");
+    setFilterExpRange("all");
+  }
+
+  return (
+    <div
+      data-ocid="find_tab.section"
+      className="flex flex-col bg-background pb-4"
+    >
+      {/* Page title */}
+      <div className="px-5 pt-4 pb-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+          <Search className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-foreground tracking-tight leading-tight">
+            Find Advocates
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            {allAdvocates.length} advocate
+            {allAdvocates.length !== 1 ? "s" : ""} registered
+          </p>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="px-5 pb-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            data-ocid="find_tab.search_input"
+            type="text"
+            placeholder="Search by name, city, court, practice area..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 h-12 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filters toggle */}
+      <div className="px-5 pb-3 flex items-center gap-2">
+        <button
+          data-ocid="find_tab.filter.toggle"
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            showFilters || activeFilterCount > 0
+              ? "border-primary bg-primary/5 text-primary"
+              : "border-border bg-white text-muted-foreground hover:text-foreground hover:border-ring/50"
+          }`}
+        >
+          <Filter className="w-4 h-4" />
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="ml-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center leading-none">
+              {activeFilterCount}
+            </span>
+          )}
+          <ChevronDown
+            className={`w-3.5 h-3.5 ml-1 transition-transform duration-200 ${
+              showFilters ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+        {activeFilterCount > 0 && (
+          <button
+            data-ocid="find_tab.clear_filters.button"
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none"
+          >
+            Clear all
+          </button>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground font-medium">
+          {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* Filter panel */}
+      {showFilters && (
+        <div className="px-5 pb-4">
+          <div className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-3">
+            {/* Practice Area */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                Practice Area
+              </Label>
+              <Select
+                value={filterPracticeArea}
+                onValueChange={setFilterPracticeArea}
+              >
+                <SelectTrigger
+                  data-ocid="find_tab.practice_area.select"
+                  className="rounded-xl h-10 text-sm"
+                >
+                  <SelectValue placeholder="All practice areas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All practice areas</SelectItem>
+                  {PRACTICE_AREAS.map((pa) => (
+                    <SelectItem key={pa} value={pa}>
+                      {pa}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Experience Range */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                Experience
+              </Label>
+              <Select value={filterExpRange} onValueChange={setFilterExpRange}>
+                <SelectTrigger
+                  data-ocid="find_tab.exp_range.select"
+                  className="rounded-xl h-10 text-sm"
+                >
+                  <SelectValue placeholder="Any experience" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Any experience</SelectItem>
+                  {EXPERIENCE_RANGES_LOCAL.map((r) => (
+                    <SelectItem key={r.label} value={r.label}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* City */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                City
+              </Label>
+              <input
+                data-ocid="find_tab.city.input"
+                type="text"
+                placeholder="Filter by city..."
+                value={filterCity}
+                onChange={(e) => setFilterCity(e.target.value)}
+                className="w-full h-10 px-3 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+              />
+            </div>
+
+            {/* Court */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground mb-1.5 block">
+                Court
+              </Label>
+              <input
+                data-ocid="find_tab.court.input"
+                type="text"
+                placeholder="Filter by court..."
+                value={filterCourt}
+                onChange={(e) => setFilterCourt(e.target.value)}
+                className="w-full h-10 px-3 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results list */}
+      <div className="px-5">
+        {filtered.length === 0 ? (
+          <div
+            data-ocid="find_tab.empty_state"
+            className="flex flex-col items-center text-center py-12"
+          >
+            <div className="w-16 h-16 rounded-full bg-muted/40 flex items-center justify-center mb-3">
+              <Search className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <p className="text-base font-semibold text-foreground">
+              No advocates found
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Try adjusting your search or filters.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {filtered.map(({ advData, profile }, idx) => {
+              const advInitials = profile.fullName
+                .split(" ")
+                .map((w) => w[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+              const connected = isConnected(advData);
+
+              return (
+                <div
+                  key={advData.userId}
+                  data-ocid={`find_tab.item.${idx + 1}`}
+                  className="bg-white rounded-2xl border border-border shadow-sm p-4 flex items-center gap-3"
+                >
+                  <div className="w-12 h-12 rounded-full border-2 border-border overflow-hidden shrink-0 bg-primary/10 flex items-center justify-center">
+                    {profile.profilePhoto ? (
+                      <img
+                        src={profile.profilePhoto}
+                        alt={profile.fullName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-sm font-bold text-primary">
+                        {advInitials}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-foreground truncate">
+                        {profile.fullName}
+                      </p>
+                      {connected && (
+                        <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                          Connected
+                        </span>
+                      )}
+                    </div>
+                    {profile.practiceArea && (
+                      <p className="text-xs text-primary font-medium mt-0.5">
+                        {profile.practiceArea}
+                      </p>
+                    )}
+                    {(profile.city || profile.state) && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {[profile.city, profile.state]
+                          .filter(Boolean)
+                          .join(", ")}
+                        {profile.yearsExp
+                          ? ` · ${profile.yearsExp} yrs exp`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Notifications Tab ────────────────────────────────────────────────────────
+
+function getNotificationIcon(type: NotificationType): string {
+  switch (type) {
+    case "new_message":
+      return "💬";
+    case "case_update":
+      return "⚖️";
+    case "hearing_reminder":
+      return "📅";
+    case "document_uploaded":
+      return "📄";
+    case "post_like":
+      return "👍";
+    case "post_comment":
+      return "💬";
+    case "new_client":
+      return "👤";
+    case "connection_request":
+      return "🤝";
+    default:
+      return "🔔";
+  }
+}
+
+function NotificationsTab({
+  user,
+  onTabChange,
+}: {
+  user: StoredUser;
+  onTabChange: (tab: string) => void;
+}) {
+  const [notifications, setNotifications] = useState<StoredNotification[]>([]);
+
+  useEffect(() => {
+    // Seed demo notifications for this user on first open
+    seedDemoNotifications(user.mobile, user.role);
+    // Load notifications
+    setNotifications(loadNotifications(user.mobile));
+    // Mark all as read
+    markAllNotificationsRead(user.mobile);
+  }, [user.mobile, user.role]);
+
+  function handleNotifClick(notif: StoredNotification) {
+    if (notif.relatedTab) {
+      onTabChange(notif.relatedTab);
+    }
+  }
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  return (
+    <div
+      data-ocid="notifications.section"
+      className="flex flex-col min-h-full bg-gray-50"
+    >
+      {/* Header */}
+      <div className="bg-white border-b border-border px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+        <h2 className="text-base font-bold text-foreground">Notifications</h2>
+        {unreadCount > 0 && (
+          <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+            {unreadCount} new
+          </span>
+        )}
+      </div>
+
+      {/* Notification list */}
+      <div className="flex-1 px-4 py-3 flex flex-col gap-2">
+        {notifications.length === 0 ? (
+          <div
+            data-ocid="notifications.empty_state"
+            className="flex flex-col items-center justify-center py-16 text-center"
+          >
+            <div className="w-16 h-16 rounded-full bg-muted/40 flex items-center justify-center mb-3">
+              <span className="text-3xl">🔔</span>
+            </div>
+            <p className="text-base font-semibold text-foreground">
+              No notifications yet
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Your updates will appear here.
+            </p>
+          </div>
+        ) : (
+          notifications.map((notif, idx) => {
+            const isUnread = !notif.read;
+            const _icon = getNotificationIcon(notif.type);
+            return (
+              <button
+                key={notif.id}
+                data-ocid={`notifications.item.${idx + 1}`}
+                type="button"
+                onClick={() => handleNotifClick(notif)}
+                className={`w-full text-left flex items-start gap-3 p-3 rounded-2xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  isUnread
+                    ? "bg-white border-primary/20 shadow-sm border-l-4 border-l-primary"
+                    : "bg-white border-border"
+                }`}
+              >
+                {/* Avatar */}
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${notif.avatarColor} text-white text-sm font-bold`}
+                >
+                  {notif.avatarPhoto ? (
+                    <img
+                      src={notif.avatarPhoto}
+                      alt=""
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                  ) : (
+                    notif.avatarInitials
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <p
+                      className={`text-sm leading-snug ${isUnread ? "font-semibold text-foreground" : "font-medium text-foreground"}`}
+                    >
+                      {notif.title}
+                    </p>
+                    {isUnread && (
+                      <span className="w-2 h-2 rounded-full bg-primary shrink-0 mt-1" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-2">
+                    {notif.body}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground/70 mt-1">
+                    {formatTimeAgo(notif.timestamp)}
+                  </p>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -10628,10 +16779,48 @@ export default function App() {
   const [selectedDiscoveryAdvocateId, setSelectedDiscoveryAdvocateId] =
     useState<string | null>(null);
   const [activeShellTab, setActiveShellTab] = useState<string>("home");
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [networkPendingCount, setNetworkPendingCount] = useState(0);
 
   // Seed sample advocates once on first mount
   useEffect(() => {
     seedSampleAdvocates();
+  }, []);
+
+  // Refresh notification count whenever the current user changes
+  useEffect(() => {
+    if (!currentUser || currentUser.mobile === "google-demo") {
+      setNotificationUnreadCount(0);
+      setNetworkPendingCount(0);
+      return;
+    }
+    setNotificationUnreadCount(getNotificationUnreadCount(currentUser.mobile));
+    if (currentUser.role === "advocate") {
+      setNetworkPendingCount(getPendingNetworkCount(currentUser.mobile));
+    }
+  }, [currentUser]);
+
+  // Refresh network pending count when switching back to network tab
+  useEffect(() => {
+    if (activeShellTab === "network" && currentUser?.role === "advocate") {
+      setNetworkPendingCount(getPendingNetworkCount(currentUser.mobile));
+    }
+  }, [activeShellTab, currentUser]);
+
+  // Listen for advocate-network-open-chat events to switch to messages tab
+  useEffect(() => {
+    function handleNetworkChatFromApp() {
+      setActiveShellTab("messages");
+    }
+    window.addEventListener(
+      "advocate-network-open-chat",
+      handleNetworkChatFromApp,
+    );
+    return () =>
+      window.removeEventListener(
+        "advocate-network-open-chat",
+        handleNetworkChatFromApp,
+      );
   }, []);
 
   function handleRegister(data: PendingProfileData) {
@@ -10648,6 +16837,8 @@ export default function App() {
       setScreen("dashboard");
       return;
     }
+    // Seed demo notifications for this user on login
+    seedDemoNotifications(user.mobile, user.role);
     if (!profileExists(user.mobile)) {
       // Build minimal PendingProfileData so profile setup can pre-fill fields
       setPendingProfileData({
@@ -10753,7 +16944,65 @@ export default function App() {
             onLogout={handleLogout}
             activeTab={activeShellTab}
             onTabChange={setActiveShellTab}
-          />
+            messageUnreadCount={
+              currentUser
+                ? getTotalUnreadCount(currentUser.mobile, currentUser.role)
+                : 0
+            }
+            notificationUnreadCount={notificationUnreadCount}
+            networkUnreadCount={networkPendingCount}
+            onNotificationClick={() => {
+              setNotificationUnreadCount(0);
+              setActiveShellTab("notifications");
+            }}
+          >
+            {activeShellTab === "home" && currentUser && (
+              <LegalFeedTab
+                currentUser={currentUser}
+                currentProfile={loadProfile(currentUser.mobile)}
+                onNavigateToFindAdvocates={() => {
+                  if (currentUser.role === "client") {
+                    setActiveShellTab("find");
+                  } else {
+                    setActiveShellTab("network");
+                  }
+                }}
+              />
+            )}
+            {activeShellTab === "cases" && currentUser && (
+              <CasesTab user={currentUser} />
+            )}
+            {activeShellTab === "messages" && currentUser && (
+              <MessagesTab user={currentUser} />
+            )}
+            {activeShellTab === "profile" && currentUser && (
+              <ProfileTab user={currentUser} />
+            )}
+            {activeShellTab === "clients" &&
+              currentUser &&
+              currentUser.role === "advocate" && (
+                <MyClientsTab user={currentUser} />
+              )}
+            {activeShellTab === "network" &&
+              currentUser &&
+              currentUser.role === "advocate" && (
+                <AdvocateNetworkTab user={currentUser} />
+              )}
+            {activeShellTab === "find" &&
+              currentUser &&
+              currentUser.role === "client" && (
+                <FindAdvocatesTab user={currentUser} />
+              )}
+            {activeShellTab === "notifications" && currentUser && (
+              <NotificationsTab
+                user={currentUser}
+                onTabChange={(tab) => {
+                  setNotificationUnreadCount(0);
+                  setActiveShellTab(tab);
+                }}
+              />
+            )}
+          </AppShell>
         )}
 
         {screen === "my-profile" && (

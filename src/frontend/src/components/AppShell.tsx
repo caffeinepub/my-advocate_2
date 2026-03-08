@@ -10,14 +10,15 @@ import {
 import {
   BarChart2,
   Bell,
-  Briefcase,
   Calendar,
   FileText,
+  Globe,
   HelpCircle,
-  Home,
+  House,
   LogOut,
   Menu,
-  MessageCircle,
+  MessageSquare,
+  Scale,
   Search,
   Settings,
   User,
@@ -39,6 +40,10 @@ interface AppShellProps {
   onLogout: () => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  messageUnreadCount?: number;
+  notificationUnreadCount?: number;
+  networkUnreadCount?: number;
+  onNotificationClick?: () => void;
   children?: React.ReactNode;
 }
 
@@ -48,10 +53,12 @@ function TopHeader({
   onHamburgerClick,
   onSearchClick,
   onNotificationClick,
+  notificationUnreadCount = 0,
 }: {
   onHamburgerClick: () => void;
   onSearchClick: () => void;
   onNotificationClick: () => void;
+  notificationUnreadCount?: number;
 }) {
   return (
     <header
@@ -103,10 +110,19 @@ function TopHeader({
           type="button"
           aria-label="Notifications"
           onClick={onNotificationClick}
-          className="flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring relative"
           style={{ width: 44, height: 44 }}
         >
           <Bell className="w-5 h-5" />
+          {notificationUnreadCount > 0 && (
+            <span
+              data-ocid="header.notification_badge"
+              className="absolute top-1.5 right-1.5 min-w-[16px] h-[16px] rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none"
+              aria-label={`${notificationUnreadCount} unread notifications`}
+            >
+              {notificationUnreadCount > 99 ? "99+" : notificationUnreadCount}
+            </span>
+          )}
         </button>
       </div>
     </header>
@@ -123,11 +139,11 @@ interface BottomNavTab {
 }
 
 const ADVOCATE_TABS: BottomNavTab[] = [
-  { id: "home", label: "Home", icon: Home, ocid: "bottom_nav.home_tab" },
+  { id: "home", label: "Home", icon: House, ocid: "bottom_nav.home_tab" },
   {
     id: "cases",
     label: "Cases",
-    icon: Briefcase,
+    icon: Scale,
     ocid: "bottom_nav.cases_tab",
   },
   {
@@ -137,62 +153,66 @@ const ADVOCATE_TABS: BottomNavTab[] = [
     ocid: "bottom_nav.clients_tab",
   },
   {
-    id: "messages",
-    label: "Messages",
-    icon: MessageCircle,
-    ocid: "bottom_nav.messages_tab",
+    id: "network",
+    label: "Network",
+    icon: Globe,
+    ocid: "bottom_nav.network_tab",
   },
   {
-    id: "profile",
-    label: "Profile",
-    icon: User,
-    ocid: "bottom_nav.profile_tab",
+    id: "messages",
+    label: "Messages",
+    icon: MessageSquare,
+    ocid: "bottom_nav.messages_tab",
   },
 ];
 
 const CLIENT_TABS: BottomNavTab[] = [
-  { id: "home", label: "Home", icon: Home, ocid: "bottom_nav.home_tab" },
+  { id: "home", label: "Home", icon: House, ocid: "bottom_nav.home_tab" },
   {
     id: "cases",
     label: "Cases",
-    icon: Briefcase,
+    icon: Scale,
     ocid: "bottom_nav.cases_tab",
   },
   {
     id: "messages",
     label: "Messages",
-    icon: MessageCircle,
+    icon: MessageSquare,
     ocid: "bottom_nav.messages_tab",
   },
   { id: "find", label: "Find", icon: Search, ocid: "bottom_nav.find_tab" },
-  {
-    id: "profile",
-    label: "Profile",
-    icon: User,
-    ocid: "bottom_nav.profile_tab",
-  },
 ];
 
 function BottomNav({
   userRole,
   activeTab,
   onTabChange,
+  messageUnreadCount = 0,
+  networkUnreadCount = 0,
 }: {
   userRole: "advocate" | "client";
   activeTab: string;
   onTabChange: (tab: string) => void;
+  messageUnreadCount?: number;
+  networkUnreadCount?: number;
 }) {
   const tabs = userRole === "advocate" ? ADVOCATE_TABS : CLIENT_TABS;
 
   return (
     <nav
-      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-40 flex items-stretch bg-white border-t border-border shadow-sm"
-      style={{ height: 56 }}
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-40 flex items-stretch bg-white border-t border-gray-100 shadow-[0_-2px_12px_rgba(0,0,0,0.08)]"
+      style={{ height: 64 }}
       aria-label="Main navigation"
     >
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
+        const showMsgBadge = tab.id === "messages" && messageUnreadCount > 0;
+        const showNetworkBadge = tab.id === "network" && networkUnreadCount > 0;
+        const showBadge = showMsgBadge || showNetworkBadge;
+        const badgeCount = showMsgBadge
+          ? messageUnreadCount
+          : networkUnreadCount;
         return (
           <button
             key={tab.id}
@@ -201,19 +221,45 @@ function BottomNav({
             onClick={() => onTabChange(tab.id)}
             aria-label={tab.label}
             aria-current={isActive ? "page" : undefined}
-            className={`flex flex-col items-center justify-center flex-1 gap-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
-              isActive
-                ? "text-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className="flex flex-col items-center justify-center flex-1 gap-0.5 pt-1.5 pb-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           >
-            <Icon
-              className={`transition-transform ${isActive ? "scale-110" : "scale-100"}`}
-              style={{ width: 20, height: 20 }}
-              strokeWidth={isActive ? 2.5 : 1.75}
-            />
+            {/* Icon with highlight pill */}
+            <div
+              className="relative flex items-center justify-center transition-all duration-200"
+              style={{
+                width: 40,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: isActive ? "#EFF6FF" : "transparent",
+              }}
+            >
+              <Icon
+                className="transition-all duration-200"
+                style={{
+                  width: 20,
+                  height: 20,
+                  color: isActive ? "#2563EB" : "#9CA3AF",
+                }}
+                strokeWidth={isActive ? 2.25 : 1.75}
+              />
+              {showBadge && (
+                <span
+                  className="absolute -top-1 -right-0.5 min-w-[14px] h-[14px] rounded-full bg-destructive text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none"
+                  aria-label={`${badgeCount} pending`}
+                >
+                  {badgeCount > 99 ? "99+" : badgeCount}
+                </span>
+              )}
+            </div>
             <span
-              className={`text-[10px] font-medium leading-none ${isActive ? "text-primary font-semibold" : ""}`}
+              className="transition-all duration-200"
+              style={{
+                fontSize: 10,
+                fontWeight: isActive ? 600 : 400,
+                lineHeight: 1,
+                color: isActive ? "#2563EB" : "#9CA3AF",
+                letterSpacing: isActive ? "0.01em" : "normal",
+              }}
             >
               {tab.label}
             </span>
@@ -302,12 +348,16 @@ function SideDrawer({
   userRole,
   userProfile,
   onLogout,
+  onNotificationsClick,
+  onTabChange,
 }: {
   open: boolean;
   onClose: () => void;
   userRole: "advocate" | "client";
   userProfile: UserProfile | null;
   onLogout: () => void;
+  onNotificationsClick?: () => void;
+  onTabChange?: (tab: string) => void;
 }) {
   const displayName = userProfile?.fullName || "User";
   const initials = getInitials(displayName);
@@ -315,7 +365,11 @@ function SideDrawer({
 
   function handleMenuItemClick(itemId: string) {
     onClose();
-    if (itemId !== "logout") {
+    if (itemId === "notifications") {
+      onNotificationsClick?.();
+    } else if (itemId === "my-profile") {
+      onTabChange?.("profile");
+    } else if (itemId !== "logout") {
       toast.info("Coming soon");
     }
   }
@@ -419,6 +473,7 @@ function TabPlaceholder({ tab }: { tab: string }) {
     home: "Home feed coming soon…",
     cases: "Cases coming soon…",
     clients: "Clients coming soon…",
+    network: "Advocate Network coming soon…",
     messages: "Messages coming soon…",
     find: "Find Advocates coming soon…",
     profile: "Profile coming soon…",
@@ -439,6 +494,10 @@ export function AppShell({
   onLogout,
   activeTab,
   onTabChange,
+  messageUnreadCount = 0,
+  notificationUnreadCount = 0,
+  networkUnreadCount = 0,
+  onNotificationClick,
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -448,7 +507,7 @@ export function AppShell({
   }
 
   function handleNotificationClick() {
-    toast.info("Notifications coming soon");
+    onNotificationClick?.();
   }
 
   return (
@@ -458,6 +517,7 @@ export function AppShell({
         onHamburgerClick={() => setDrawerOpen(true)}
         onSearchClick={handleSearchClick}
         onNotificationClick={handleNotificationClick}
+        notificationUnreadCount={notificationUnreadCount}
       />
 
       {/* Side drawer */}
@@ -467,12 +527,18 @@ export function AppShell({
         userRole={userRole}
         userProfile={userProfile}
         onLogout={onLogout}
+        onNotificationsClick={() => {
+          onNotificationClick?.();
+        }}
+        onTabChange={(tab) => {
+          onTabChange(tab);
+        }}
       />
 
       {/* Main content area — padded to avoid header/nav overlap */}
       <main
         className="flex-1 overflow-y-auto"
-        style={{ paddingTop: 56, paddingBottom: 56 }}
+        style={{ paddingTop: 56, paddingBottom: 64 }}
       >
         {children ?? <TabPlaceholder tab={activeTab} />}
       </main>
@@ -482,6 +548,8 @@ export function AppShell({
         userRole={userRole}
         activeTab={activeTab}
         onTabChange={onTabChange}
+        messageUnreadCount={messageUnreadCount}
+        networkUnreadCount={networkUnreadCount}
       />
     </div>
   );
