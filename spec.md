@@ -1,113 +1,48 @@
-# My Advocate – Case Management System
+# My Advocate
 
 ## Current State
-
-The app has a complete auth, registration, profile setup, and dashboard system. Advocates have a "My Cases" screen and a "My Clients" screen. Clients have a "My Cases" screen. Both currently navigate to placeholder pages. All data is stored in localStorage with structured data models (users, profiles, advocate data, client data). Screens are managed via a `Screen` union type in App.tsx.
-
-Existing localStorage keys:
-- `myadvocate_users` – StoredUser[]
-- `myadvocate_profiles` – StoredProfile[]
-- `myadvocate_advocate_data` – AdvocateData[]
-- `myadvocate_client_data` – ClientData[] (has `linkedAdvocateId` = advocate's referral code)
-
-Existing constants: `PRACTICE_AREAS` array (9 options: Criminal Law, Civil Law, Family Law, Corporate Law, Property Law, Tax Law, Constitutional Law, Labour Law, Other).
+The app has a full auth flow (splash, login, OTP, signup, profile setup), dashboards for advocates and clients, case management, document management, a messaging system, hearings list, and a hearing calendar. The Screen union and routing are all in a single App.tsx (~9600 lines). Data lives in localStorage. The existing `advocate-public-profile` screen lets a client view one advocate's profile after navigating from their own "My Profile" page (via the connected-advocate card).
 
 ## Requested Changes (Diff)
 
 ### Add
-
-**Case data model** (localStorage key: `myadvocate_cases`):
-```
-interface StoredCase {
-  id: string;                  // unique uuid
-  advocateId: string;          // advocate's mobile (userId)
-  clientId: string;            // client's mobile (userId)
-  caseTitle: string;
-  caseNumber: string;
-  courtName: string;
-  caseType: string;            // one of PRACTICE_AREAS
-  caseStatus: "Active" | "Pending" | "Adjourned" | "Closed" | "Disposed";
-  nextHearingDate: string;     // ISO date string (YYYY-MM-DD) or ""
-  notes: string;
-  createdAt: string;           // ISO timestamp
-}
-```
-
-**Case CRUD helpers** (localStorage-based):
-- `loadCases()`, `saveCases()`, `addCase()`, `updateCase()`, `deleteCase()`
-- `getCasesForAdvocateClient(advocateId, clientId)` – cases for a specific client under an advocate
-- `getCasesForClient(clientId)` – all cases where clientId matches (for client view, filtered to their connected advocate only)
-- `getUpcomingHearings(advocateId)` – all future hearing cases across all clients for an advocate, sorted by date
-
-**New Screen types** added to `Screen` union:
-- `"case-form"` – add/edit case modal/page (advocate only)
-- `"hearings"` – dedicated Hearings page (advocate only)
-
-**MyCasesPage** (advocate view):
-- When advocate opens "My Cases": show their clients list, each client showing a count of their cases
-- Clicking a client opens that client's case list within the advocate's context
-- Cases shown as cards with filter (Case Status, Hearing Date range, Court Name) and sort (Next Hearing Date, Recently Added)
-- Each case card shows: Case Title, Case Number, Court Name, Case Type badge, Case Status badge, Next Hearing Date, truncated Notes
-- Add Case button at top → opens Add Case form
-- Each card has Edit and Delete buttons (advocate only)
-- Status badge colors: Active=green, Pending=yellow, Adjourned=orange, Closed=gray, Disposed=red
-
-**MyCasesPage** (client view):
-- Shows all cases linked to the client via their connected advocate
-- Read-only cards (no Add/Edit/Delete buttons)
-- Same card design, filter, and sort as advocate view
-- If client has no connected advocate, show empty state: "Connect with an advocate to view your cases."
-
-**Client Profile Page extension** (advocate viewing a client):
-- Add "Cases" section at the bottom of the existing ClientProfilePage
-- Shows that client's cases list (advocate can add/edit/delete)
-- Same card style with Add Case button
-
-**Add/Edit Case Form** (Sheet or Dialog, advocate only):
-Fields:
-- Case Title (text, required)
-- Case Number (text, required)
-- Court Name (text, required)
-- Case Type (dropdown, PRACTICE_AREAS, required)
-- Case Status (dropdown: Active/Pending/Adjourned/Closed/Disposed, required)
-- Next Hearing Date (date input, optional)
-- Notes (textarea, optional)
-
-**Upcoming Hearings section on Dashboard**:
-- Advocate dashboard: add "Upcoming Hearings" section below the 4 cards
-- Shows next 3–5 upcoming hearings across all clients
-- Each hearing chip shows: client name, case title, court, date
-- Date highlights: "Today" (red/urgent), "Tomorrow" (orange), "Next 7 days" (blue), further = gray
-- "View All" link navigates to `"hearings"` screen
-
-**Hearings Page** (dedicated, advocate only):
-- Full list of all future hearings for all the advocate's clients
-- Grouped or sorted by date
-- Same highlight logic: Today, Tomorrow, Next 7 days, Beyond
-- Each card: client name, case title, court name, case number, date label
-- Back to Dashboard button in header
+- New `Screen` values: `"find-advocates"` and `"advocate-discovery-profile"`
+- `SAMPLE_ADVOCATES` constant: 5 dummy advocate profiles pre-seeded into localStorage on first load (stored as `StoredProfile` + `AdvocateData` entries) so the directory is never empty
+- `FindAdvocatesPage` component:
+  - Accessible to both clients and advocates (advocates use it for networking)
+  - Search bar (text input, filters by name)
+  - Filter dropdowns: Practice Area, City (free text), Court (free text), Experience Range (0–5 yrs / 5–10 yrs / 10+ yrs)
+  - Advocate cards grid showing: profile photo/initials avatar, name, practice area badge, city, experience
+  - "Connected" badge on cards where the current client is already linked to that advocate
+  - Clicking a card navigates to `advocate-discovery-profile`
+  - Empty state when no results match
+- `AdvocateDiscoveryProfilePage` component (read-only, full profile):
+  - Cover photo / gradient, avatar straddling boundary
+  - Full name, practice area, court, experience, state/city, bio, bar council number
+  - If current user is a **client** and NOT yet connected → show two connect options:
+    - "Connect" button (auto-connects in demo mode: sets `linkedAdvocateId`)
+    - "Enter Referral Code" collapsible input
+  - If current user is a **client** and IS already connected → show "Connected" badge only (no connect buttons)
+  - If current user is an **advocate** → show a "Network" badge, no connect button
+  - Back button returns to `find-advocates`
+- "Find Advocates" card on **both** advocate and client dashboards (new card added to both `advocateCards` and `clientCards` arrays)
 
 ### Modify
-
-- `MyCasesPage`: replace placeholder content with full case management UI
-- `ClientProfilePage`: add Cases section at bottom
-- `DashboardScreen` (advocate view): add Upcoming Hearings section below navigation cards
-- `Screen` type union: add `"case-form"` and `"hearings"`
-- App root: wire `"hearings"` screen to new HearingsPage component
+- `Screen` type union: add `"find-advocates"` and `"advocate-discovery-profile"`
+- `DashboardScreen`: add "Find Advocates" card to both `advocateCards` and `clientCards`
+- `App` root: add routing cases for `find-advocates` and `advocate-discovery-profile`
+- Add `selectedDiscoveryAdvocateId` state variable in App root
+- Seed sample advocate data on app first load (localStorage check)
 
 ### Remove
-
-- Placeholder text in MyCasesPage ("Your case management system will appear here")
+- Nothing removed
 
 ## Implementation Plan
-
-1. Add `StoredCase` interface and all CRUD helpers to App.tsx
-2. Add `"hearings"` to the Screen union type
-3. Replace `MyCasesPage` with full advocate case management (client selector → case list with filters/sort → add/edit/delete via Sheet form)
-4. Replace `MyCasesPage` client view with read-only filtered case list
-5. Add Cases section to `ClientProfilePage` (advocate view of a client)
-6. Add `AddEditCaseSheet` component (Sheet-based form, advocate only)
-7. Add Upcoming Hearings section to `DashboardScreen` (advocate only), showing 3–5 next hearings
-8. Build `HearingsPage` with full future hearing list, date grouping and highlight logic
-9. Wire `"hearings"` screen in App root
-10. Apply all `data-ocid` deterministic markers to new interactive surfaces
+1. Add `"find-advocates"` and `"advocate-discovery-profile"` to the `Screen` type
+2. Define `SAMPLE_ADVOCATES` array (5 entries) and a `seedSampleAdvocates()` function that inserts them on first load (guarded by a localStorage key)
+3. Call `seedSampleAdvocates()` inside the App component on mount
+4. Build `FindAdvocatesPage`: search bar + 4 filter dropdowns, advocate card grid, Connected badge logic, empty state
+5. Build `AdvocateDiscoveryProfilePage`: full read-only profile, client connect button (auto-accept), referral code input, advocate networking view
+6. Add "Find Advocates" card to both dashboard card arrays
+7. Add `selectedDiscoveryAdvocateId` state + routing in App root for the two new screens
+8. Wire back-navigation: `find-advocates` → back to dashboard; `advocate-discovery-profile` → back to `find-advocates`

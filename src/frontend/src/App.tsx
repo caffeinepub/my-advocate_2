@@ -40,31 +40,39 @@ import {
   Calendar,
   CalendarDays,
   Camera,
+  Check,
+  CheckCheck,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ClipboardCopy,
+  Download,
   Eye,
   EyeOff,
+  File,
+  FileText,
   Filter,
   ImageIcon,
   Lock,
   Mail,
   MessageCircle,
+  Paperclip,
   Pencil,
   Phone,
   Plus,
   Scale,
   Search,
+  Send,
   Trash2,
+  UploadCloud,
   User,
   Users,
   X,
   ZoomIn,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import Cropper from "react-easy-crop";
-import type { Area } from "react-easy-crop";
+import { useEffect, useMemo, useRef, useState } from "react";
+// react-easy-crop replaced with custom canvas cropper below
 import { toast } from "sonner";
 
 type Screen =
@@ -80,10 +88,14 @@ type Screen =
   | "my-profile"
   | "my-cases"
   | "messages"
+  | "chat"
   | "my-clients"
   | "client-profile"
   | "advocate-public-profile"
-  | "hearings";
+  | "hearings"
+  | "calendar"
+  | "find-advocates"
+  | "advocate-discovery-profile";
 type LoginTab = "password" | "otp";
 type OtpStep = "phone" | "verify";
 type OtpPhase = "mobile" | "verify" | "form";
@@ -322,6 +334,158 @@ function generateReferralCode(): string {
   return code;
 }
 
+// ─── Sample Advocate Seeding ───────────────────────────────────────────────────
+const LS_SEEDED_KEY = "myadvocate_seeded_v1";
+
+const SAMPLE_ADVOCATES: Array<{
+  user: StoredUser;
+  profile: StoredProfile;
+  advocateData: AdvocateData;
+}> = [
+  {
+    user: {
+      mobile: "9800000001",
+      email: "arjun.sharma@demo.com",
+      password: "demo1234",
+      role: "advocate",
+    },
+    profile: {
+      mobile: "9800000001",
+      fullName: "Arjun Sharma",
+      practiceArea: "Criminal Law",
+      yearsExp: "12",
+      courtName: "Delhi High Court",
+      barCouncilNumber: "D/1234/2012",
+      state: "Delhi",
+      city: "New Delhi",
+      bio: "Senior criminal defense lawyer with 12 years at Delhi High Court. Specialist in bail matters, sessions trials, and appeals.",
+      contactEmail: "arjun.sharma@demo.com",
+    },
+    advocateData: {
+      userId: "9800000001",
+      name: "Arjun Sharma",
+      referralCode: "ADV-DEMO1",
+      profileData: {},
+    },
+  },
+  {
+    user: {
+      mobile: "9800000002",
+      email: "priya.nair@demo.com",
+      password: "demo1234",
+      role: "advocate",
+    },
+    profile: {
+      mobile: "9800000002",
+      fullName: "Priya Nair",
+      practiceArea: "Family Law",
+      yearsExp: "8",
+      courtName: "Bombay High Court",
+      barCouncilNumber: "MH/4521/2016",
+      state: "Maharashtra",
+      city: "Mumbai",
+      bio: "Family law specialist handling matrimonial disputes, child custody, and succession matters.",
+      contactEmail: "priya.nair@demo.com",
+    },
+    advocateData: {
+      userId: "9800000002",
+      name: "Priya Nair",
+      referralCode: "ADV-DEMO2",
+      profileData: {},
+    },
+  },
+  {
+    user: {
+      mobile: "9800000003",
+      email: "ravi.krishnan@demo.com",
+      password: "demo1234",
+      role: "advocate",
+    },
+    profile: {
+      mobile: "9800000003",
+      fullName: "Ravi Krishnan",
+      practiceArea: "Corporate Law",
+      yearsExp: "15",
+      courtName: "Madras High Court",
+      barCouncilNumber: "TN/6789/2009",
+      state: "Tamil Nadu",
+      city: "Chennai",
+      bio: "Corporate and commercial litigation expert. Advises startups and listed companies on regulatory and contract disputes.",
+      contactEmail: "ravi.krishnan@demo.com",
+    },
+    advocateData: {
+      userId: "9800000003",
+      name: "Ravi Krishnan",
+      referralCode: "ADV-DEMO3",
+      profileData: {},
+    },
+  },
+  {
+    user: {
+      mobile: "9800000004",
+      email: "meera.verma@demo.com",
+      password: "demo1234",
+      role: "advocate",
+    },
+    profile: {
+      mobile: "9800000004",
+      fullName: "Meera Verma",
+      practiceArea: "Property Law",
+      yearsExp: "6",
+      courtName: "Allahabad High Court",
+      barCouncilNumber: "UP/3310/2018",
+      state: "Uttar Pradesh",
+      city: "Lucknow",
+      bio: "Property and real estate lawyer handling title disputes, lease agreements, and RERA matters.",
+      contactEmail: "meera.verma@demo.com",
+    },
+    advocateData: {
+      userId: "9800000004",
+      name: "Meera Verma",
+      referralCode: "ADV-DEMO4",
+      profileData: {},
+    },
+  },
+  {
+    user: {
+      mobile: "9800000005",
+      email: "sameer.bose@demo.com",
+      password: "demo1234",
+      role: "advocate",
+    },
+    profile: {
+      mobile: "9800000005",
+      fullName: "Sameer Bose",
+      practiceArea: "Tax Law",
+      yearsExp: "10",
+      courtName: "Calcutta High Court",
+      barCouncilNumber: "WB/2201/2014",
+      state: "West Bengal",
+      city: "Kolkata",
+      bio: "Tax litigation attorney with expertise in GST disputes, income tax appeals, and customs matters.",
+      contactEmail: "sameer.bose@demo.com",
+    },
+    advocateData: {
+      userId: "9800000005",
+      name: "Sameer Bose",
+      referralCode: "ADV-DEMO5",
+      profileData: {},
+    },
+  },
+];
+
+function seedSampleAdvocates() {
+  if (localStorage.getItem(LS_SEEDED_KEY)) return;
+  for (const { user, profile, advocateData } of SAMPLE_ADVOCATES) {
+    if (!mobileExists(user.mobile)) {
+      saveUser(user);
+      saveProfile(profile);
+      saveAdvocateData(advocateData);
+    }
+  }
+  localStorage.setItem(LS_SEEDED_KEY, "1");
+}
+
 // ─── Case Data ────────────────────────────────────────────────────────────────
 
 interface StoredCase {
@@ -393,6 +557,46 @@ function getUpcomingHearings(advocateId: string): StoredCase[] {
     );
 }
 
+// Returns upcoming hearings for a CLIENT (filtered by clientId)
+function getUpcomingHearingsForClient(clientMobile: string): StoredCase[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return loadCases()
+    .filter(
+      (c) =>
+        c.clientId === clientMobile &&
+        c.nextHearingDate &&
+        new Date(c.nextHearingDate) >= today,
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.nextHearingDate).getTime() -
+        new Date(b.nextHearingDate).getTime(),
+    );
+}
+
+// Returns hearings on a specific date for a user (role-aware)
+function getHearingsForDate(
+  userId: string,
+  role: "advocate" | "client",
+  dateStr: string,
+): StoredCase[] {
+  return loadCases().filter((c) => {
+    if (role === "advocate")
+      return c.advocateId === userId && c.nextHearingDate === dateStr;
+    return c.clientId === userId && c.nextHearingDate === dateStr;
+  });
+}
+
+// Returns all future hearings for a user (role-aware)
+function getAllUpcomingHearings(
+  userId: string,
+  role: "advocate" | "client",
+): StoredCase[] {
+  if (role === "advocate") return getUpcomingHearings(userId);
+  return getUpcomingHearingsForClient(userId);
+}
+
 function generateCaseId(): string {
   return `case_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -451,6 +655,235 @@ function getCaseStatusColor(status: string): string {
     default:
       return "bg-gray-100 text-gray-600 border-gray-200";
   }
+}
+
+// ─── Document Data ────────────────────────────────────────────────────────────
+
+type DocType = "Petition" | "Evidence" | "Court Order" | "Affidavit" | "Other";
+
+interface StoredDocument {
+  id: string;
+  caseId: string;
+  advocateId: string; // advocate's mobile (owner)
+  clientId: string; // client's mobile
+  title: string;
+  docType: DocType;
+  notes: string;
+  fileName: string;
+  fileType: string;
+  // fileData is omitted from localStorage; actual file kept in memory only
+  uploadedAt: string; // ISO timestamp
+  uploadedByName: string;
+}
+
+const LS_DOCUMENTS_KEY = "myadvocate_documents";
+const DOC_TYPES: DocType[] = [
+  "Petition",
+  "Evidence",
+  "Court Order",
+  "Affidavit",
+  "Other",
+];
+
+const ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/png",
+];
+
+const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+
+// In-memory blob store for current session (avoids localStorage quota issues)
+const docBlobStore = new Map<string, Blob>();
+
+function loadDocuments(): StoredDocument[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_DOCUMENTS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+// Returns true on success, throws on quota/other error
+function saveDocumentToStorage(doc: StoredDocument): void {
+  const all = loadDocuments();
+  all.push(doc);
+  localStorage.setItem(LS_DOCUMENTS_KEY, JSON.stringify(all));
+}
+
+function deleteDocumentById(id: string) {
+  const all = loadDocuments().filter((d) => d.id !== id);
+  localStorage.setItem(LS_DOCUMENTS_KEY, JSON.stringify(all));
+  docBlobStore.delete(id);
+}
+
+function getDocumentsForCase(caseId: string): StoredDocument[] {
+  return loadDocuments().filter((d) => d.caseId === caseId);
+}
+
+function generateDocId(): string {
+  return `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ─── Message Data ─────────────────────────────────────────────────────────────
+
+interface StoredMessage {
+  id: string;
+  conversationId: string; // "{userId1}_{userId2}" sorted alphabetically
+  senderId: string; // mobile of sender
+  senderName: string;
+  senderRole: "advocate" | "client";
+  text: string; // empty if file-only message
+  fileAttachment?: {
+    id: string; // key into chatFileBlobStore
+    fileName: string;
+    fileSize: number; // bytes
+    fileType: string; // MIME type
+  };
+  timestamp: string; // ISO
+  seen: boolean; // true once recipient has opened the conversation
+}
+
+const LS_MESSAGES_KEY = "myadvocate_messages";
+
+// In-memory blob store for chat files (same pattern as docBlobStore)
+const chatFileBlobStore = new Map<string, Blob>();
+
+function getConversationId(a: string, b: string): string {
+  return [a, b].sort().join("_");
+}
+
+function loadAllMessages(): StoredMessage[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_MESSAGES_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function loadConversationMessages(conversationId: string): StoredMessage[] {
+  return loadAllMessages().filter((m) => m.conversationId === conversationId);
+}
+
+function saveMessageToStorage(msg: StoredMessage): void {
+  const all = loadAllMessages();
+  all.push(msg);
+  localStorage.setItem(LS_MESSAGES_KEY, JSON.stringify(all));
+}
+
+function markConversationAsSeen(
+  conversationId: string,
+  readerMobile: string,
+): void {
+  const all = loadAllMessages();
+  let changed = false;
+  const updated = all.map((m) => {
+    if (
+      m.conversationId === conversationId &&
+      m.senderId !== readerMobile &&
+      !m.seen
+    ) {
+      changed = true;
+      return { ...m, seen: true };
+    }
+    return m;
+  });
+  if (changed) {
+    localStorage.setItem(LS_MESSAGES_KEY, JSON.stringify(updated));
+  }
+}
+
+function getConversationLastMessage(
+  conversationId: string,
+): StoredMessage | null {
+  const msgs = loadConversationMessages(conversationId);
+  if (msgs.length === 0) return null;
+  return msgs[msgs.length - 1];
+}
+
+function getUnreadCount(conversationId: string, readerMobile: string): number {
+  return loadConversationMessages(conversationId).filter(
+    (m) => m.senderId !== readerMobile && !m.seen,
+  ).length;
+}
+
+function getTotalUnreadCount(
+  myMobile: string,
+  myRole: "advocate" | "client",
+): number {
+  const all = loadAllMessages();
+  if (myRole === "advocate") {
+    // Advocate: sum unread across all conversations where they are participant
+    const advData = loadAllAdvocateData().find((a) => a.userId === myMobile);
+    if (!advData) return 0;
+    const clients = getClientsForAdvocate(advData.referralCode);
+    return clients.reduce((sum, c) => {
+      const convId = getConversationId(myMobile, c.userId);
+      return (
+        sum +
+        all.filter(
+          (m) =>
+            m.conversationId === convId && m.senderId !== myMobile && !m.seen,
+        ).length
+      );
+    }, 0);
+  }
+  // Client: one conversation with their advocate
+  const clientData = loadAllClientData().find((c) => c.userId === myMobile);
+  if (!clientData?.linkedAdvocateId) return 0;
+  const advocate = loadAllAdvocateData().find(
+    (a) =>
+      a.referralCode.toUpperCase() ===
+      clientData.linkedAdvocateId!.toUpperCase(),
+  );
+  if (!advocate) return 0;
+  const convId = getConversationId(myMobile, advocate.userId);
+  return all.filter(
+    (m) => m.conversationId === convId && m.senderId !== myMobile && !m.seen,
+  ).length;
+}
+
+function generateMsgId(): string {
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function generateChatFileId(): string {
+  return `chatfile_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatMsgTime(isoStr: string): string {
+  const d = new Date(isoStr);
+  const now = new Date();
+  const isToday =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (isToday) {
+    return d.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  }
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileIcon(fileType: string): React.ElementType {
+  if (fileType.startsWith("image/")) return ImageIcon;
+  if (fileType === "application/pdf") return FileText;
+  return File;
 }
 
 // ─── Indian States ────────────────────────────────────────────────────────────
@@ -2765,6 +3198,82 @@ function PageHeader({
   );
 }
 
+// ─── Dashboard Client Hearings Preview ───────────────────────────────────────
+
+function DashboardClientHearingsPreview({
+  clientMobile,
+  onViewAll,
+}: {
+  clientMobile: string;
+  onViewAll: () => void;
+}) {
+  const hearings = getUpcomingHearingsForClient(clientMobile).slice(0, 3);
+  const total = getUpcomingHearingsForClient(clientMobile).length;
+
+  if (hearings.length === 0) {
+    return (
+      <div
+        data-ocid="dashboard.client_hearings.empty_state"
+        className="bg-white rounded-2xl border border-border p-5 text-center"
+      >
+        <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-2" />
+        <p className="text-xs text-muted-foreground">
+          No upcoming hearings scheduled.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {hearings.map((c, idx) => {
+        const hearingInfo = getHearingLabel(c.nextHearingDate);
+        return (
+          <div
+            key={c.id}
+            data-ocid={`dashboard.client_hearings.item.${idx + 1}`}
+            className="bg-white rounded-xl border border-border shadow-sm p-3 flex flex-col gap-1.5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-xs font-bold text-foreground leading-snug flex-1 min-w-0 truncate">
+                {c.caseTitle}
+              </p>
+              <span
+                className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+              >
+                {c.caseStatus}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Building2 className="w-3 h-3 shrink-0" />
+              <span className="truncate">{c.courtName}</span>
+            </div>
+            <span
+              className={`self-start inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${hearingInfo.color}`}
+            >
+              <Calendar className="w-2.5 h-2.5" />
+              {hearingInfo.label} ·{" "}
+              {new Date(`${c.nextHearingDate}T00:00:00`).toLocaleDateString(
+                "en-IN",
+                { day: "numeric", month: "short" },
+              )}
+            </span>
+          </div>
+        );
+      })}
+      {total > 3 && (
+        <button
+          type="button"
+          onClick={onViewAll}
+          className="text-xs text-primary font-semibold text-center py-1 hover:underline focus-visible:outline-none"
+        >
+          +{total - 3} more hearings →
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Dashboard Hearings Preview ───────────────────────────────────────────────
 
 function DashboardHearingsPreview({
@@ -2934,6 +3443,24 @@ function DashboardScreen({
       iconColor: "text-violet-600",
       screen: "hearings",
     },
+    {
+      ocid: "dashboard.calendar.card",
+      icon: Calendar,
+      label: "Calendar",
+      desc: "View hearing calendar",
+      color: "bg-purple-50",
+      iconColor: "text-purple-600",
+      screen: "calendar",
+    },
+    {
+      ocid: "dashboard.find-advocates.card",
+      icon: Search,
+      label: "Find Advocates",
+      desc: "Search and network with advocates",
+      color: "bg-amber-50",
+      iconColor: "text-amber-600",
+      screen: "find-advocates",
+    },
   ];
 
   const clientCards: CardDef[] = [
@@ -2963,6 +3490,24 @@ function DashboardScreen({
       color: "bg-sky-50",
       iconColor: "text-sky-600",
       screen: "messages",
+    },
+    {
+      ocid: "dashboard.calendar.card",
+      icon: Calendar,
+      label: "Calendar",
+      desc: "View hearing calendar",
+      color: "bg-purple-50",
+      iconColor: "text-purple-600",
+      screen: "calendar",
+    },
+    {
+      ocid: "dashboard.find-advocates.card",
+      icon: Search,
+      label: "Find Advocates",
+      desc: "Search and connect with advocates",
+      color: "bg-amber-50",
+      iconColor: "text-amber-600",
+      screen: "find-advocates",
     },
   ];
 
@@ -3141,40 +3686,55 @@ function DashboardScreen({
           </div>
 
           {/* Quick access cards */}
-          <div
-            className={`grid gap-3 w-full ${isAdvocate ? "grid-cols-3" : "grid-cols-3"}`}
-          >
-            {cards.map(
-              ({
-                ocid,
-                icon: Icon,
-                label,
-                desc,
-                color,
-                iconColor,
-                screen: targetScreen,
-              }) => (
-                <button
-                  key={label}
-                  data-ocid={ocid}
-                  type="button"
-                  onClick={() => onNavigate(targetScreen)}
-                  className="flex flex-col items-center gap-2.5 bg-white rounded-2xl border border-border shadow-sm px-2 py-5 hover:shadow-md hover:border-primary/30 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
-                  aria-label={label}
-                  title={desc}
-                >
-                  <div
-                    className={`w-12 h-12 rounded-full ${color} flex items-center justify-center`}
-                  >
-                    <Icon className={`w-5 h-5 ${iconColor}`} />
-                  </div>
-                  <span className="text-xs font-semibold text-foreground text-center leading-tight">
-                    {label}
-                  </span>
-                </button>
-              ),
-            )}
-          </div>
+          {(() => {
+            const totalUnread = user
+              ? getTotalUnreadCount(user.mobile, user.role)
+              : 0;
+            return (
+              <div
+                className={`grid gap-3 w-full ${isAdvocate ? "grid-cols-3" : "grid-cols-3"}`}
+              >
+                {cards.map(
+                  ({
+                    ocid,
+                    icon: Icon,
+                    label,
+                    desc,
+                    color,
+                    iconColor,
+                    screen: targetScreen,
+                  }) => (
+                    <button
+                      key={label}
+                      data-ocid={ocid}
+                      type="button"
+                      onClick={() => onNavigate(targetScreen)}
+                      className="relative flex flex-col items-center gap-2.5 bg-white rounded-2xl border border-border shadow-sm px-2 py-5 hover:shadow-md hover:border-primary/30 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-95"
+                      aria-label={label}
+                      title={desc}
+                    >
+                      <div
+                        className={`relative w-12 h-12 rounded-full ${color} flex items-center justify-center`}
+                      >
+                        <Icon className={`w-5 h-5 ${iconColor}`} />
+                        {targetScreen === "messages" && totalUnread > 0 && (
+                          <span
+                            data-ocid="dashboard.messages.badge"
+                            className="absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1 border-2 border-white"
+                          >
+                            {totalUnread > 99 ? "99+" : totalUnread}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs font-semibold text-foreground text-center leading-tight">
+                        {label}
+                      </span>
+                    </button>
+                  ),
+                )}
+              </div>
+            );
+          })()}
 
           {/* ── Upcoming Hearings (advocate only) ── */}
           {isAdvocate && user && (
@@ -3196,6 +3756,33 @@ function DashboardScreen({
               <DashboardHearingsPreview
                 advocateId={user.mobile}
                 onViewAll={() => onNavigate("hearings")}
+              />
+            </div>
+          )}
+
+          {/* ── Upcoming Hearings (client only) ── */}
+          {!isAdvocate && user && (
+            <div
+              data-ocid="dashboard.client_hearings.section"
+              className="w-full mt-5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-foreground flex items-center gap-1.5">
+                  <CalendarDays className="w-4 h-4 text-purple-500" />
+                  Upcoming Hearings
+                </h2>
+                <button
+                  data-ocid="dashboard.client_hearings.link"
+                  type="button"
+                  onClick={() => onNavigate("calendar")}
+                  className="text-xs text-primary font-semibold hover:underline focus-visible:outline-none"
+                >
+                  View All
+                </button>
+              </div>
+              <DashboardClientHearingsPreview
+                clientMobile={user.mobile}
+                onViewAll={() => onNavigate("calendar")}
               />
             </div>
           )}
@@ -4769,6 +5356,553 @@ function AddEditCaseSheet({
   );
 }
 
+// ─── CaseDocumentsSection ─────────────────────────────────────────────────────
+
+function getDocTypeColor(docType: DocType): string {
+  switch (docType) {
+    case "Petition":
+      return "bg-blue-100 text-blue-700 border-blue-200";
+    case "Evidence":
+      return "bg-green-100 text-green-700 border-green-200";
+    case "Court Order":
+      return "bg-purple-100 text-purple-700 border-purple-200";
+    case "Affidavit":
+      return "bg-orange-100 text-orange-700 border-orange-200";
+    case "Other":
+      return "bg-gray-100 text-gray-600 border-gray-200";
+  }
+}
+
+function getDocIcon(fileType: string) {
+  if (fileType === "application/pdf")
+    return <FileText className="w-5 h-5 text-red-500 shrink-0" />;
+  if (
+    fileType === "application/msword" ||
+    fileType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  )
+    return <FileText className="w-5 h-5 text-blue-500 shrink-0" />;
+  if (fileType.startsWith("image/"))
+    return <ImageIcon className="w-5 h-5 text-emerald-500 shrink-0" />;
+  return <File className="w-5 h-5 text-muted-foreground shrink-0" />;
+}
+
+type CaseDocumentsSectionProps = {
+  caseId: string;
+  advocateId: string;
+  clientId: string;
+  currentUserMobile: string;
+  role: "advocate" | "client";
+  advocateName: string;
+};
+
+function CaseDocumentsSection({
+  caseId,
+  advocateId,
+  clientId,
+  currentUserMobile,
+  role,
+  advocateName,
+}: CaseDocumentsSectionProps) {
+  const isAdvocate = role === "advocate";
+  const hasAccess =
+    currentUserMobile === advocateId || currentUserMobile === clientId;
+
+  // All hooks must come before any conditional return
+  const [docs, setDocs] = useState<StoredDocument[]>(() =>
+    getDocumentsForCase(caseId),
+  );
+  const [filterType, setFilterType] = useState<DocType | "All">("All");
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
+  // Upload form state
+  const [showUploadForm, setShowUploadForm] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [fileError, setFileError] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [docTitle, setDocTitle] = useState("");
+  const [docType, setDocType] = useState<DocType>("Petition");
+  const [docNotes, setDocNotes] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Access control — after hooks
+  if (!hasAccess) return null;
+
+  function refreshDocs() {
+    setDocs(getDocumentsForCase(caseId));
+  }
+
+  const filteredDocs =
+    filterType === "All" ? docs : docs.filter((d) => d.docType === filterType);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileError("");
+
+    // Validate extension
+    const ext = `.${file.name.split(".").pop()?.toLowerCase()}`;
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      setFileError(
+        "Invalid file type. Only PDF, DOC, DOCX, JPG, JPEG, PNG are allowed.",
+      );
+      e.target.value = "";
+      return;
+    }
+
+    // Validate MIME
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      setFileError(
+        "Invalid file type. Only PDF, DOC, DOCX, JPG, JPEG, PNG are allowed.",
+      );
+      e.target.value = "";
+      return;
+    }
+
+    // Validate size
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setFileError("File size exceeds the 25 MB limit.");
+      e.target.value = "";
+      return;
+    }
+
+    setSelectedFile(file);
+  }
+
+  function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+    setFileError("");
+
+    if (!selectedFile) {
+      setFileError("Please select a file to upload.");
+      return;
+    }
+    if (!docTitle.trim()) {
+      setFileError("Please enter a document title.");
+      return;
+    }
+
+    setUploading(true);
+
+    // Use a short timeout to let the browser paint the "Uploading…" state
+    setTimeout(() => {
+      try {
+        const docId = generateDocId();
+        // Store blob in memory for view/download during this session
+        docBlobStore.set(docId, selectedFile!);
+
+        const newDoc: StoredDocument = {
+          id: docId,
+          caseId,
+          advocateId,
+          clientId,
+          title: docTitle.trim(),
+          docType,
+          notes: docNotes.trim(),
+          fileName: selectedFile!.name,
+          fileType: selectedFile!.type,
+          uploadedAt: new Date().toISOString(),
+          uploadedByName: advocateName,
+        };
+
+        saveDocumentToStorage(newDoc);
+        refreshDocs();
+        setUploading(false);
+        setShowUploadForm(false);
+        setSelectedFile(null);
+        setDocTitle("");
+        setDocType("Petition");
+        setDocNotes("");
+        setFileError("");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        toast.success("Document uploaded successfully");
+      } catch (err) {
+        setUploading(false);
+        const msg =
+          err instanceof DOMException && err.name === "QuotaExceededError"
+            ? "Storage full. Please clear some data and try again."
+            : "Upload failed. Please try again.";
+        setFileError(msg);
+        toast.error(msg);
+      }
+    }, 300);
+  }
+
+  function handleViewDocument(doc: StoredDocument) {
+    const blob = docBlobStore.get(doc.id);
+    if (!blob) {
+      toast.error(
+        "File preview is only available for documents uploaded in this session.",
+      );
+      return;
+    }
+    try {
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch {
+      toast.error("Failed to open document.");
+    }
+  }
+
+  function handleDownloadDocument(doc: StoredDocument) {
+    const blob = docBlobStore.get(doc.id);
+    if (!blob) {
+      toast.error(
+        "Download is only available for documents uploaded in this session.",
+      );
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = doc.fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function handleDeleteConfirm() {
+    if (!deletingDocId) return;
+    deleteDocumentById(deletingDocId);
+    refreshDocs();
+    setDeletingDocId(null);
+    toast.success("Document deleted");
+  }
+
+  return (
+    <div data-ocid="docs.section" className="mt-3 border-t border-border pt-3">
+      {/* Section header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-primary" />
+          <span className="text-sm font-bold text-foreground">Documents</span>
+          {docs.length > 0 && (
+            <span className="text-xs font-semibold bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">
+              {docs.length}
+            </span>
+          )}
+        </div>
+        {isAdvocate && (
+          <button
+            data-ocid="docs.add_document.button"
+            type="button"
+            onClick={() => {
+              setShowUploadForm((v) => !v);
+              setFileError("");
+            }}
+            className="flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-1.5 rounded-xl hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            {showUploadForm ? "Cancel" : "Add Document"}
+          </button>
+        )}
+      </div>
+
+      {/* Upload form (advocate only) */}
+      {isAdvocate && showUploadForm && (
+        <form
+          data-ocid="docs.upload_form.section"
+          onSubmit={handleUpload}
+          className="mb-4 bg-muted/40 rounded-xl border border-border p-4 flex flex-col gap-3"
+        >
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Upload Document
+          </p>
+
+          {/* File picker */}
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">
+              File{" "}
+              <span className="text-muted-foreground font-normal">
+                (PDF, DOC, DOCX, JPG, PNG · max 25 MB)
+              </span>
+            </Label>
+            <button
+              type="button"
+              className="relative flex items-center gap-3 border-2 border-dashed border-border rounded-xl p-3 cursor-pointer hover:border-primary/50 transition-colors w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <UploadCloud className="w-5 h-5 text-muted-foreground shrink-0" />
+              <span className="text-sm text-muted-foreground truncate flex-1">
+                {selectedFile ? selectedFile.name : "Tap to select file"}
+              </span>
+              {selectedFile && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                  className="text-muted-foreground hover:text-destructive focus-visible:outline-none"
+                  aria-label="Remove selected file"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              data-ocid="docs.file.upload_button"
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              onChange={handleFileChange}
+              className="sr-only"
+            />
+            {fileError && (
+              <p
+                data-ocid="docs.error_state"
+                className="text-destructive text-xs mt-1.5"
+              >
+                {fileError}
+              </p>
+            )}
+          </div>
+
+          {/* Title */}
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">
+              Document Title <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              data-ocid="docs.title.input"
+              type="text"
+              placeholder="e.g. Bail Application Petition"
+              value={docTitle}
+              onChange={(e) => setDocTitle(e.target.value)}
+              className="h-10 text-sm rounded-xl"
+              required
+            />
+          </div>
+
+          {/* Document Type */}
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">
+              Document Type
+            </Label>
+            <Select
+              value={docType}
+              onValueChange={(v) => setDocType(v as DocType)}
+            >
+              <SelectTrigger
+                data-ocid="docs.type.select"
+                className="h-10 text-sm rounded-xl"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DOC_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">
+              Notes{" "}
+              <span className="text-muted-foreground font-normal">
+                (optional)
+              </span>
+            </Label>
+            <Textarea
+              data-ocid="docs.notes.textarea"
+              placeholder="Any notes about this document..."
+              value={docNotes}
+              onChange={(e) => setDocNotes(e.target.value)}
+              className="text-sm rounded-xl resize-none min-h-[72px]"
+            />
+          </div>
+
+          {/* Submit */}
+          <Button
+            data-ocid="docs.submit.upload_button"
+            type="submit"
+            disabled={uploading}
+            className="h-10 text-sm font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
+          >
+            {uploading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin mr-2 inline-block" />
+                Uploading…
+              </>
+            ) : (
+              <>
+                <UploadCloud className="w-4 h-4 mr-2" />
+                Upload Document
+              </>
+            )}
+          </Button>
+        </form>
+      )}
+
+      {/* Filter pills */}
+      {docs.length > 0 && (
+        <div className="flex gap-1.5 flex-wrap mb-3">
+          {(["All", ...DOC_TYPES] as (DocType | "All")[]).map((t, i) => (
+            <button
+              key={t}
+              data-ocid={`docs.filter.tab.${i + 1}`}
+              type="button"
+              onClick={() => setFilterType(t)}
+              className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                filterType === t
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-white text-muted-foreground border-border hover:border-primary/30"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {filteredDocs.length === 0 && (
+        <div
+          data-ocid="docs.empty_state"
+          className="flex flex-col items-center justify-center text-center py-6 bg-muted/30 rounded-xl border border-dashed border-border"
+        >
+          <FileText className="w-8 h-8 text-muted-foreground/40 mb-2" />
+          <p className="text-xs font-semibold text-foreground">
+            {isAdvocate
+              ? filterType !== "All"
+                ? `No ${filterType} documents`
+                : "No documents uploaded yet."
+              : "No documents available for this case."}
+          </p>
+          {isAdvocate && filterType === "All" && (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Click 'Add Document' to upload.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Document cards */}
+      {filteredDocs.length > 0 && (
+        <div className="flex flex-col gap-2.5">
+          {filteredDocs.map((doc, idx) => (
+            <div
+              key={doc.id}
+              data-ocid={`docs.item.${idx + 1}`}
+              className="bg-white rounded-xl border border-border shadow-sm p-3 flex flex-col gap-2"
+            >
+              {/* Header row */}
+              <div className="flex items-start gap-2.5">
+                {getDocIcon(doc.fileType)}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-foreground leading-snug truncate">
+                    {doc.title}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                    {doc.fileName}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${getDocTypeColor(doc.docType)}`}
+                >
+                  {doc.docType}
+                </span>
+              </div>
+
+              {/* Meta row */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-muted-foreground">
+                  {new Date(doc.uploadedAt).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
+                <span className="w-1 h-1 rounded-full bg-muted-foreground/40 shrink-0" />
+                <span className="text-[11px] text-muted-foreground">
+                  By: {doc.uploadedByName}
+                </span>
+              </div>
+
+              {/* Notes */}
+              {doc.notes && (
+                <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                  {doc.notes}
+                </p>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1.5 border-t border-border flex-wrap">
+                <button
+                  data-ocid={`docs.view.button.${idx + 1}`}
+                  type="button"
+                  onClick={() => handleViewDocument(doc)}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:bg-primary/5 px-2.5 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  View Document
+                </button>
+                <button
+                  data-ocid={`docs.download.button.${idx + 1}`}
+                  type="button"
+                  onClick={() => handleDownloadDocument(doc)}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-foreground/70 hover:bg-muted px-2.5 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download
+                </button>
+                {isAdvocate && (
+                  <button
+                    data-ocid={`docs.delete.button.${idx + 1}`}
+                    type="button"
+                    onClick={() => setDeletingDocId(doc.id)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-destructive hover:bg-destructive/5 px-2.5 py-1.5 rounded-lg transition-colors ml-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog
+        open={!!deletingDocId}
+        onOpenChange={(v) => !v && setDeletingDocId(null)}
+      >
+        <AlertDialogContent data-ocid="docs.delete.dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the document and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-ocid="docs.delete.cancel_button"
+              onClick={() => setDeletingDocId(null)}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-ocid="docs.delete.confirm_button"
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Yes, Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 // ─── CaseCard ─────────────────────────────────────────────────────────────────
 
 type CaseCardProps = {
@@ -4778,6 +5912,10 @@ type CaseCardProps = {
   clientName?: string;
   onEdit?: () => void;
   onDelete?: () => void;
+  // Documents section
+  showDocuments?: boolean;
+  currentUserMobile?: string;
+  advocateName?: string;
 };
 
 function CaseCard({
@@ -4787,6 +5925,9 @@ function CaseCard({
   clientName,
   onEdit,
   onDelete,
+  showDocuments = false,
+  currentUserMobile,
+  advocateName = "",
 }: CaseCardProps) {
   const statusColor = getCaseStatusColor(c.caseStatus);
   const hearingInfo = c.nextHearingDate
@@ -4888,6 +6029,18 @@ function CaseCard({
             </button>
           )}
         </div>
+      )}
+
+      {/* Documents section */}
+      {showDocuments && currentUserMobile && (
+        <CaseDocumentsSection
+          caseId={c.id}
+          advocateId={c.advocateId}
+          clientId={c.clientId}
+          currentUserMobile={currentUserMobile}
+          role={isAdvocate ? "advocate" : "client"}
+          advocateName={advocateName}
+        />
       )}
     </div>
   );
@@ -5205,6 +6358,9 @@ function MyCasesPage({
                       setCaseSheetOpen(true);
                     }}
                     onDelete={() => setDeletingCaseId(c.id)}
+                    showDocuments
+                    currentUserMobile={user!.mobile}
+                    advocateName={profile?.fullName || "Advocate"}
                   />
                 ))}
               </div>
@@ -5342,14 +6498,26 @@ function MyCasesPage({
                     data-ocid="my_cases.list"
                     className="flex flex-col gap-3"
                   >
-                    {filteredCases.map((c, idx) => (
-                      <CaseCard
-                        key={c.id}
-                        c={c}
-                        index={idx + 1}
-                        isAdvocate={false}
-                      />
-                    ))}
+                    {filteredCases.map((c, idx) => {
+                      const advProfile = connectedAdvocate
+                        ? loadProfile(connectedAdvocate.userId)
+                        : null;
+                      const advName =
+                        advProfile?.fullName ||
+                        connectedAdvocate?.name ||
+                        "Advocate";
+                      return (
+                        <CaseCard
+                          key={c.id}
+                          c={c}
+                          index={idx + 1}
+                          isAdvocate={false}
+                          showDocuments
+                          currentUserMobile={user!.mobile}
+                          advocateName={advName}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </>
@@ -5373,8 +6541,9 @@ function HearingsPage({
   onLogout: () => void;
 }) {
   const profile = user ? loadProfile(user.mobile) : null;
+  const isAdvocate = user?.role === "advocate";
 
-  const upcoming = user ? getUpcomingHearings(user.mobile) : [];
+  const upcoming = user ? getAllUpcomingHearings(user.mobile, user.role) : [];
 
   // Group hearings
   const today = new Date();
@@ -5481,7 +6650,7 @@ function HearingsPage({
                             c={c}
                             index={idx + 1}
                             isAdvocate={false}
-                            clientName={clientName}
+                            clientName={isAdvocate ? clientName : undefined}
                           />
                         </div>
                       );
@@ -5497,18 +6666,109 @@ function HearingsPage({
   );
 }
 
-// ─── Messages Page ────────────────────────────────────────────────────────────
+// ─── Messages Page (Conversation List) ───────────────────────────────────────
 
 function MessagesPage({
   user,
   onBack,
   onLogout,
+  onOpenChat,
 }: {
   user: StoredUser | null;
   onBack: () => void;
   onLogout: () => void;
+  onOpenChat: (partnerUserId: string) => void;
 }) {
   const profile = user ? loadProfile(user.mobile) : null;
+  const isAdvocate = user?.role === "advocate";
+
+  // Re-render trigger for unread counts (updates on mount)
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    setTick((v) => v + 1);
+  }, []);
+
+  // Build conversation list
+  type ConvItem = {
+    partnerId: string;
+    partnerName: string;
+    partnerInitials: string;
+    partnerPhoto: string | undefined;
+    conversationId: string;
+    lastMsg: StoredMessage | null;
+    unread: number;
+  };
+
+  let conversations: ConvItem[] = [];
+
+  if (isAdvocate && user) {
+    const advData = loadAllAdvocateData().find((a) => a.userId === user.mobile);
+    const clients = advData ? getClientsForAdvocate(advData.referralCode) : [];
+    conversations = clients.map((c) => {
+      const cProfile = loadProfile(c.userId);
+      const name = cProfile?.fullName || c.name || "Client";
+      const initials = name
+        .split(" ")
+        .map((w: string) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase();
+      const convId = getConversationId(user.mobile, c.userId);
+      return {
+        partnerId: c.userId,
+        partnerName: name,
+        partnerInitials: initials,
+        partnerPhoto: cProfile?.profilePhoto,
+        conversationId: convId,
+        lastMsg: getConversationLastMessage(convId),
+        unread: getUnreadCount(convId, user.mobile),
+      };
+    });
+  } else if (!isAdvocate && user) {
+    const clientData = loadAllClientData().find(
+      (c) => c.userId === user.mobile,
+    );
+    if (clientData?.linkedAdvocateId) {
+      const advocate = loadAllAdvocateData().find(
+        (a) =>
+          a.referralCode.toUpperCase() ===
+          clientData.linkedAdvocateId!.toUpperCase(),
+      );
+      if (advocate) {
+        const advProfile = loadProfile(advocate.userId);
+        const name = advProfile?.fullName || advocate.name || "Advocate";
+        const initials = name
+          .split(" ")
+          .map((w: string) => w[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        const convId = getConversationId(user.mobile, advocate.userId);
+        conversations = [
+          {
+            partnerId: advocate.userId,
+            partnerName: name,
+            partnerInitials: initials,
+            partnerPhoto: advProfile?.profilePhoto,
+            conversationId: convId,
+            lastMsg: getConversationLastMessage(convId),
+            unread: getUnreadCount(convId, user.mobile),
+          },
+        ];
+      }
+    }
+  }
+
+  // Sort by last message time descending
+  conversations.sort((a, b) => {
+    if (!a.lastMsg && !b.lastMsg) return 0;
+    if (!a.lastMsg) return 1;
+    if (!b.lastMsg) return -1;
+    return (
+      new Date(b.lastMsg.timestamp).getTime() -
+      new Date(a.lastMsg.timestamp).getTime()
+    );
+  });
 
   return (
     <div
@@ -5522,17 +6782,513 @@ function MessagesPage({
         onLogout={onLogout}
         backLabel="Back to Dashboard"
       />
-      <main className="flex flex-col flex-1 items-center justify-center px-6 py-12 text-center">
-        <div className="w-20 h-20 rounded-full bg-sky-50 flex items-center justify-center mb-5">
-          <MessageCircle className="w-9 h-9 text-sky-400" />
+
+      <main className="flex flex-col flex-1 overflow-y-auto px-4 pt-2 pb-8">
+        <div className="mb-4 px-1">
+          <h1 className="text-lg font-bold text-foreground">Messages</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {isAdvocate
+              ? "Conversations with your clients"
+              : "Chat with your advocate"}
+          </p>
         </div>
-        <h1 className="text-xl font-bold text-foreground tracking-tight">
-          Messages
-        </h1>
-        <p className="text-sm text-muted-foreground mt-3 max-w-[260px] leading-relaxed">
-          Your client and advocate conversations will appear here.
-        </p>
+
+        {conversations.length === 0 ? (
+          <div
+            data-ocid="messages.empty_state"
+            className="flex flex-col flex-1 items-center justify-center text-center py-12"
+          >
+            <div className="w-20 h-20 rounded-full bg-sky-50 flex items-center justify-center mb-4">
+              <MessageCircle className="w-9 h-9 text-sky-300" />
+            </div>
+            <p className="text-base font-semibold text-foreground">
+              No conversations yet
+            </p>
+            <p className="text-sm text-muted-foreground mt-2 max-w-[260px] leading-relaxed">
+              {isAdvocate
+                ? "No clients connected yet. Connect clients using your referral code."
+                : "Connect with an advocate using their referral code to start messaging."}
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {conversations.map((conv, idx) => {
+              const preview = conv.lastMsg
+                ? conv.lastMsg.fileAttachment
+                  ? `📎 ${conv.lastMsg.fileAttachment.fileName}`
+                  : conv.lastMsg.text.length > 42
+                    ? `${conv.lastMsg.text.slice(0, 42)}…`
+                    : conv.lastMsg.text
+                : "No messages yet";
+              const timeStr = conv.lastMsg
+                ? formatMsgTime(conv.lastMsg.timestamp)
+                : "";
+              return (
+                <button
+                  key={conv.partnerId}
+                  data-ocid={`messages.conversation.item.${idx + 1}`}
+                  type="button"
+                  onClick={() => onOpenChat(conv.partnerId)}
+                  className="flex items-center gap-3 bg-white rounded-2xl border border-border shadow-sm px-4 py-3 hover:shadow-md hover:border-primary/20 transition-all duration-150 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99]"
+                >
+                  {/* Avatar */}
+                  <div className="relative shrink-0">
+                    <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-border bg-primary/10 flex items-center justify-center">
+                      {conv.partnerPhoto ? (
+                        <img
+                          src={conv.partnerPhoto}
+                          alt={conv.partnerName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-bold text-primary">
+                          {conv.partnerInitials}
+                        </span>
+                      )}
+                    </div>
+                    {/* Online dot */}
+                    <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-400 border-2 border-white" />
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-sm font-bold truncate ${conv.unread > 0 ? "text-foreground" : "text-foreground/90"}`}
+                      >
+                        {conv.partnerName}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground shrink-0">
+                        {timeStr}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <span
+                        className={`text-xs truncate ${conv.unread > 0 ? "text-foreground font-medium" : "text-muted-foreground"}`}
+                      >
+                        {preview}
+                      </span>
+                      {conv.unread > 0 && (
+                        <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center px-1">
+                          {conv.unread > 99 ? "99+" : conv.unread}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </main>
+    </div>
+  );
+}
+
+// ─── Chat Screen ──────────────────────────────────────────────────────────────
+
+function ChatScreen({
+  user,
+  partnerUserId,
+  onBack,
+  onLogout,
+}: {
+  user: StoredUser | null;
+  partnerUserId: string;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  const myProfile = user ? loadProfile(user.mobile) : null;
+  const partnerProfile = loadProfile(partnerUserId);
+  const partnerName =
+    partnerProfile?.fullName ||
+    (user?.role === "advocate" ? "Client" : "Advocate");
+  const partnerInitials = partnerName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const conversationId = user
+    ? getConversationId(user.mobile, partnerUserId)
+    : "";
+
+  const [messages, setMessages] = useState<StoredMessage[]>(() =>
+    user ? loadConversationMessages(conversationId) : [],
+  );
+  const [inputText, setInputText] = useState("");
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Mark as seen on mount and whenever messages change
+  useEffect(() => {
+    if (user && conversationId) {
+      markConversationAsSeen(conversationId, user.mobile);
+    }
+  }, [conversationId, user]);
+
+  // Auto-scroll to bottom whenever messages update
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally scroll when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Reload messages from storage to pick up seen state changes
+  useEffect(() => {
+    if (conversationId) {
+      setMessages(loadConversationMessages(conversationId));
+    }
+  }, [conversationId]);
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      toast.error("Only PDF, DOC, DOCX, JPG, PNG files are allowed.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast.error("File size exceeds the 25 MB limit.");
+      return;
+    }
+    setPendingFile(file);
+    // Reset file input so same file can be re-selected
+    e.target.value = "";
+  }
+
+  function handleSend() {
+    if (!user || (!inputText.trim() && !pendingFile)) return;
+    setIsSending(true);
+
+    const myName =
+      myProfile?.fullName ||
+      (user.mobile === "google-demo" ? "Demo User" : "User");
+
+    let fileAttachment: StoredMessage["fileAttachment"] | undefined = undefined;
+    if (pendingFile) {
+      const fileId = generateChatFileId();
+      chatFileBlobStore.set(fileId, pendingFile);
+      fileAttachment = {
+        id: fileId,
+        fileName: pendingFile.name,
+        fileSize: pendingFile.size,
+        fileType: pendingFile.type,
+      };
+    }
+
+    const msg: StoredMessage = {
+      id: generateMsgId(),
+      conversationId,
+      senderId: user.mobile,
+      senderName: myName,
+      senderRole: user.role,
+      text: inputText.trim(),
+      fileAttachment,
+      timestamp: new Date().toISOString(),
+      seen: false,
+    };
+
+    saveMessageToStorage(msg);
+    setMessages(loadConversationMessages(conversationId));
+    setInputText("");
+    setPendingFile(null);
+    setIsSending(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  function downloadChatFile(fileId: string, fileName: string) {
+    const blob = chatFileBlobStore.get(fileId);
+    if (!blob) {
+      toast.error("File unavailable – please re-upload.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  const canSend = inputText.trim().length > 0 || pendingFile !== null;
+
+  return (
+    <div
+      data-ocid="chat.section"
+      className="flex flex-col min-h-screen bg-background"
+    >
+      {/* ── Chat header ── */}
+      <header className="sticky top-0 z-10 flex items-center gap-3 w-full px-4 py-3 border-b border-border bg-white shadow-sm">
+        <button
+          data-ocid="chat.back.button"
+          type="button"
+          onClick={onBack}
+          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring -ml-1 shrink-0"
+          aria-label="Back to messages"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+
+        {/* Partner avatar */}
+        <div className="relative shrink-0">
+          <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border bg-primary/10 flex items-center justify-center">
+            {partnerProfile?.profilePhoto ? (
+              <img
+                src={partnerProfile.profilePhoto}
+                alt={partnerName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-xs font-bold text-primary">
+                {partnerInitials}
+              </span>
+            )}
+          </div>
+          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white" />
+        </div>
+
+        {/* Partner info */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-foreground truncate">
+            {partnerName}
+          </p>
+          <p className="text-xs text-green-500 font-medium">Online</p>
+        </div>
+
+        {/* Sign out */}
+        <button
+          data-ocid="page.logout.button"
+          type="button"
+          onClick={onLogout}
+          className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
+          aria-label="Sign out"
+        >
+          Sign out
+        </button>
+      </header>
+
+      {/* ── Message list ── */}
+      <main className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-2">
+        {messages.length === 0 ? (
+          <div
+            data-ocid="chat.empty_state"
+            className="flex flex-col flex-1 items-center justify-center text-center py-16"
+          >
+            <div className="w-16 h-16 rounded-full bg-sky-50 flex items-center justify-center mb-3">
+              <MessageCircle className="w-7 h-7 text-sky-300" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">
+              Start a conversation
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">Say hello! 👋</p>
+          </div>
+        ) : (
+          messages.map((msg, idx) => {
+            const isMe = user && msg.senderId === user.mobile;
+            const FileIconComp = msg.fileAttachment
+              ? getFileIcon(msg.fileAttachment.fileType)
+              : File;
+            const blobAvailable = msg.fileAttachment
+              ? chatFileBlobStore.has(msg.fileAttachment.id)
+              : false;
+
+            return (
+              <div
+                key={msg.id}
+                data-ocid={`chat.message.item.${idx + 1}`}
+                className={`flex flex-col ${isMe ? "items-end" : "items-start"} gap-0.5`}
+              >
+                {/* Sender name for partner messages */}
+                {!isMe && (
+                  <span className="text-[11px] text-muted-foreground font-medium px-1 mb-0.5">
+                    {msg.senderName}
+                  </span>
+                )}
+
+                {/* Bubble */}
+                <div
+                  className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 ${
+                    isMe
+                      ? "bg-primary text-primary-foreground rounded-br-sm"
+                      : "bg-muted text-foreground rounded-bl-sm"
+                  }`}
+                >
+                  {/* Text */}
+                  {msg.text && (
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                      {msg.text}
+                    </p>
+                  )}
+
+                  {/* File attachment */}
+                  {msg.fileAttachment && (
+                    <div
+                      className={`mt-1.5 rounded-xl border p-2.5 flex items-center gap-2.5 ${
+                        isMe
+                          ? "bg-white/15 border-white/20"
+                          : "bg-white border-border"
+                      }`}
+                    >
+                      <div
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                          isMe ? "bg-white/20" : "bg-primary/10"
+                        }`}
+                      >
+                        <FileIconComp
+                          className={`w-4 h-4 ${isMe ? "text-white" : "text-primary"}`}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p
+                          className={`text-xs font-semibold truncate ${isMe ? "text-white" : "text-foreground"}`}
+                        >
+                          {msg.fileAttachment.fileName}
+                        </p>
+                        <p
+                          className={`text-[10px] mt-0.5 ${isMe ? "text-white/70" : "text-muted-foreground"}`}
+                        >
+                          {formatFileSize(msg.fileAttachment.fileSize)}
+                        </p>
+                      </div>
+                      {blobAvailable ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            downloadChatFile(
+                              msg.fileAttachment!.id,
+                              msg.fileAttachment!.fileName,
+                            )
+                          }
+                          className={`shrink-0 p-1.5 rounded-lg transition-colors ${
+                            isMe
+                              ? "text-white hover:bg-white/20"
+                              : "text-primary hover:bg-primary/10"
+                          } focus-visible:outline-none`}
+                          aria-label="Download file"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span
+                          className={`text-[10px] shrink-0 ${isMe ? "text-white/60" : "text-muted-foreground"}`}
+                        >
+                          Unavailable
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Timestamp + tick (my messages only) */}
+                {isMe && (
+                  <div className="flex items-center gap-1 px-1">
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatMsgTime(msg.timestamp)}
+                    </span>
+                    {msg.seen ? (
+                      <CheckCheck className="w-3.5 h-3.5 text-primary" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5 text-muted-foreground" />
+                    )}
+                  </div>
+                )}
+                {/* Timestamp for partner messages */}
+                {!isMe && (
+                  <span className="text-[10px] text-muted-foreground px-1">
+                    {formatMsgTime(msg.timestamp)}
+                  </span>
+                )}
+              </div>
+            );
+          })
+        )}
+        <div ref={messagesEndRef} />
+      </main>
+
+      {/* ── Input bar ── */}
+      <div className="sticky bottom-0 z-10 bg-white border-t border-border px-3 py-2.5">
+        {/* Pending file preview */}
+        {pendingFile && (
+          <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-xl px-3 py-2 mb-2">
+            <FileText className="w-4 h-4 text-primary shrink-0" />
+            <span className="text-xs font-medium text-foreground truncate flex-1">
+              {pendingFile.name}
+            </span>
+            <span className="text-xs text-muted-foreground shrink-0">
+              {formatFileSize(pendingFile.size)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPendingFile(null)}
+              className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
+              aria-label="Remove file"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
+          {/* File attach button */}
+          <button
+            data-ocid="chat.attach_button"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 w-9 h-9 rounded-full border border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Attach file"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
+          {/* Text input */}
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              data-ocid="chat.input"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message..."
+              rows={1}
+              className="w-full resize-none rounded-2xl border border-border bg-muted/30 px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+              style={{
+                maxHeight: "4.5rem",
+                overflowY: "auto",
+                lineHeight: "1.4",
+              }}
+            />
+          </div>
+
+          {/* Send button */}
+          <button
+            data-ocid="chat.send_button"
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend || isSending}
+            className="shrink-0 w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Send message"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5544,11 +7300,13 @@ function MyClientsPage({
   onBack,
   onLogout,
   onViewProfile,
+  onMessageClient,
 }: {
   user: StoredUser | null;
   onBack: () => void;
   onLogout: () => void;
   onViewProfile: (clientUserId: string) => void;
+  onMessageClient?: (clientUserId: string) => void;
 }) {
   // Role guard — only advocates can access this page
   useEffect(() => {
@@ -5674,15 +7432,28 @@ function MyClientsPage({
                     </p>
                   </div>
 
-                  {/* View Profile button */}
-                  <button
-                    data-ocid={`my_clients.view_profile.button.${idx + 1}`}
-                    type="button"
-                    onClick={() => onViewProfile(client.userId)}
-                    className="shrink-0 text-xs font-semibold text-primary border border-primary/30 rounded-lg px-3 py-1.5 hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    View Profile
-                  </button>
+                  {/* Action buttons */}
+                  <div className="flex flex-col gap-1.5 shrink-0">
+                    <button
+                      data-ocid={`my_clients.view_profile.button.${idx + 1}`}
+                      type="button"
+                      onClick={() => onViewProfile(client.userId)}
+                      className="text-xs font-semibold text-primary border border-primary/30 rounded-lg px-3 py-1.5 hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring whitespace-nowrap"
+                    >
+                      View Profile
+                    </button>
+                    {onMessageClient && (
+                      <button
+                        data-ocid={`my_clients.message.button.${idx + 1}`}
+                        type="button"
+                        onClick={() => onMessageClient(client.userId)}
+                        className="text-xs font-semibold text-primary-foreground bg-primary rounded-lg px-3 py-1.5 hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring whitespace-nowrap flex items-center gap-1"
+                      >
+                        <MessageCircle className="w-3 h-3" />
+                        Message
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -5700,11 +7471,13 @@ function ClientProfilePage({
   user,
   onBack,
   onLogout,
+  onMessageClient,
 }: {
   clientUserId: string;
   user: StoredUser | null;
   onBack: () => void;
   onLogout: () => void;
+  onMessageClient?: (clientUserId: string) => void;
 }) {
   const myProfile = user ? loadProfile(user.mobile) : null;
   const clientProfile = loadProfile(clientUserId);
@@ -5809,7 +7582,11 @@ function ClientProfilePage({
           <Button
             data-ocid="client_profile.message.button"
             type="button"
-            onClick={() => toast.info("Messaging coming soon")}
+            onClick={() =>
+              onMessageClient
+                ? onMessageClient(clientUserId)
+                : toast.info("Messaging coming soon")
+            }
             className="mt-6 w-full h-12 text-base font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl"
           >
             <MessageCircle className="w-4 h-4 mr-2" />
@@ -5890,19 +7667,26 @@ function ClientProfileCasesSection({
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {cases.map((c, idx) => (
-            <CaseCard
-              key={c.id}
-              c={c}
-              index={idx + 1}
-              isAdvocate
-              onEdit={() => {
-                setEditingCase(c);
-                setCaseSheetOpen(true);
-              }}
-              onDelete={() => setDeletingCaseId(c.id)}
-            />
-          ))}
+          {cases.map((c, idx) => {
+            const advProfile = loadProfile(user.mobile);
+            const advName = advProfile?.fullName || "Advocate";
+            return (
+              <CaseCard
+                key={c.id}
+                c={c}
+                index={idx + 1}
+                isAdvocate
+                onEdit={() => {
+                  setEditingCase(c);
+                  setCaseSheetOpen(true);
+                }}
+                onDelete={() => setDeletingCaseId(c.id)}
+                showDocuments
+                currentUserMobile={user.mobile}
+                advocateName={advName}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -5954,11 +7738,13 @@ function AdvocatePublicProfilePage({
   user,
   onBack,
   onLogout,
+  onMessageAdvocate,
 }: {
   advocateUserId: string;
   user: StoredUser | null;
   onBack: () => void;
   onLogout: () => void;
+  onMessageAdvocate?: (advocateUserId: string) => void;
 }) {
   const myProfile = user ? loadProfile(user.mobile) : null;
   const advProfile = loadProfile(advocateUserId);
@@ -6138,7 +7924,11 @@ function AdvocatePublicProfilePage({
             <button
               data-ocid="advocate_public_profile.message.button"
               type="button"
-              onClick={() => toast.info("Messaging coming soon")}
+              onClick={() =>
+                onMessageAdvocate
+                  ? onMessageAdvocate(advocateUserId)
+                  : toast.info("Messaging coming soon")
+              }
               className="flex items-center justify-center gap-2 h-12 rounded-xl border-2 border-primary text-primary text-sm font-semibold hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Mail className="w-4 h-4" />
@@ -6151,38 +7941,7 @@ function AdvocatePublicProfilePage({
   );
 }
 
-// ─── getCroppedImg helper ─────────────────────────────────────────────────────
-
-async function getCroppedImg(
-  imageSrc: string,
-  pixelCrop: Area,
-): Promise<string> {
-  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = imageSrc;
-  });
-  const canvas = document.createElement("canvas");
-  const size = Math.min(pixelCrop.width, pixelCrop.height);
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(
-    image,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
-    0,
-    0,
-    size,
-    size,
-  );
-  return canvas.toDataURL("image/jpeg", 0.92);
-}
-
-// ─── Profile Photo Cropper (react-easy-crop) ─────────────────────────────────
+// ─── Profile Photo Cropper (canvas-based, drag + zoom) ────────────────────────
 
 type ProfilePhotoCropperProps = {
   onCropped: (dataUrl: string) => void;
@@ -6196,10 +7955,80 @@ function ProfilePhotoCropper({
   initialSrc,
 }: ProfilePhotoCropperProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [imageSrc, setImageSrc] = useState<string | null>(initialSrc ?? null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  // offset of image center relative to crop box center (in image pixels)
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef<{
+    mx: number;
+    my: number;
+    ox: number;
+    oy: number;
+  } | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const CANVAS_SIZE = 260;
+
+  // Draw canvas and reset when imageSrc/zoom/offset changes
+  useEffect(() => {
+    if (!imageSrc || !canvasRef.current) {
+      // Reset cached image when imageSrc is cleared
+      imageRef.current = null;
+      return;
+    }
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d")!;
+    canvas.width = CANVAS_SIZE;
+    canvas.height = CANVAS_SIZE;
+
+    if (imageRef.current) {
+      drawCropCanvas(ctx, imageRef.current, zoom, offset, CANVAS_SIZE);
+    } else {
+      // New image — reset position/zoom then load
+      setOffset({ x: 0, y: 0 });
+      setZoom(1);
+      const img = new Image();
+      img.onload = () => {
+        imageRef.current = img;
+        drawCropCanvas(ctx, img, 1, { x: 0, y: 0 }, CANVAS_SIZE);
+      };
+      img.src = imageSrc;
+    }
+  }, [imageSrc, zoom, offset]);
+
+  function drawCropCanvas(
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    z: number,
+    off: { x: number; y: number },
+    size: number,
+  ) {
+    ctx.clearRect(0, 0, size, size);
+    // Draw background
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, size, size);
+
+    // Calculate displayed image dimensions
+    const scale = z;
+    const displayW = img.naturalWidth * scale;
+    const displayH = img.naturalHeight * scale;
+
+    // Center of canvas + offset
+    const drawX = size / 2 - displayW / 2 + off.x;
+    const drawY = size / 2 - displayH / 2 + off.y;
+
+    ctx.drawImage(img, drawX, drawY, displayW, displayH);
+
+    // Draw circular clip overlay
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.restore();
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -6207,25 +8036,61 @@ function ProfilePhotoCropper({
     const reader = new FileReader();
     reader.onload = (ev) => {
       setImageSrc(ev.target?.result as string);
-      setCrop({ x: 0, y: 0 });
-      setZoom(1);
     };
     reader.readAsDataURL(file);
-    // Reset value so same file can be re-selected
     e.target.value = "";
   }
 
-  const onCropComplete = useCallback(
-    (_croppedArea: Area, croppedPixels: Area) => {
-      setCroppedAreaPixels(croppedPixels);
-    },
-    [],
-  );
+  function handleMouseDown(e: React.MouseEvent) {
+    setDragging(true);
+    dragStart.current = {
+      mx: e.clientX,
+      my: e.clientY,
+      ox: offset.x,
+      oy: offset.y,
+    };
+  }
 
-  async function handleApplyCrop() {
-    if (!imageSrc || !croppedAreaPixels) return;
+  function handleMouseMove(e: React.MouseEvent) {
+    if (!dragging || !dragStart.current) return;
+    const dx = e.clientX - dragStart.current.mx;
+    const dy = e.clientY - dragStart.current.my;
+    setOffset({ x: dragStart.current.ox + dx, y: dragStart.current.oy + dy });
+  }
+
+  function handleMouseUp() {
+    setDragging(false);
+    dragStart.current = null;
+  }
+
+  function handleTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    setDragging(true);
+    dragStart.current = {
+      mx: t.clientX,
+      my: t.clientY,
+      ox: offset.x,
+      oy: offset.y,
+    };
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!dragging || !dragStart.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - dragStart.current.mx;
+    const dy = t.clientY - dragStart.current.my;
+    setOffset({ x: dragStart.current.ox + dx, y: dragStart.current.oy + dy });
+  }
+
+  function handleApplyCrop() {
+    if (!imageSrc || !imageRef.current) return;
     try {
-      const dataUrl = await getCroppedImg(imageSrc, croppedAreaPixels);
+      const offscreenCanvas = document.createElement("canvas");
+      offscreenCanvas.width = CANVAS_SIZE;
+      offscreenCanvas.height = CANVAS_SIZE;
+      const ctx = offscreenCanvas.getContext("2d")!;
+      drawCropCanvas(ctx, imageRef.current, zoom, offset, CANVAS_SIZE);
+      const dataUrl = offscreenCanvas.toDataURL("image/jpeg", 0.92);
       onCropped(dataUrl);
       setImageSrc(null);
     } catch {
@@ -6233,7 +8098,7 @@ function ProfilePhotoCropper({
     }
   }
 
-  // State: preview (croppedUrl set)
+  // State: preview
   if (croppedUrl) {
     return (
       <div className="flex flex-col items-center gap-3">
@@ -6311,23 +8176,31 @@ function ProfilePhotoCropper({
   // State: image loaded — show crop UI
   return (
     <div className="flex flex-col items-center gap-4 w-full">
-      {/* Cropper container — must have position: relative and explicit height */}
-      <div
-        style={{ position: "relative", width: "100%", height: 280 }}
-        className="rounded-2xl overflow-hidden border-2 border-primary/30 bg-gray-900"
-      >
-        <Cropper
-          image={imageSrc}
-          crop={crop}
-          zoom={zoom}
-          aspect={1}
-          cropShape="round"
-          showGrid={false}
-          onCropChange={setCrop}
-          onZoomChange={setZoom}
-          onCropComplete={onCropComplete}
+      {/* Canvas crop area */}
+      <div className="rounded-2xl overflow-hidden border-2 border-primary/30 bg-gray-900 cursor-grab active:cursor-grabbing select-none">
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_SIZE}
+          height={CANVAS_SIZE}
+          style={{
+            display: "block",
+            width: CANVAS_SIZE,
+            height: CANVAS_SIZE,
+            borderRadius: "50%",
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleMouseUp}
+          aria-label="Drag to reposition photo"
         />
       </div>
+      <p className="text-xs text-muted-foreground">
+        Drag to reposition · Use slider to zoom
+      </p>
 
       {/* Zoom slider */}
       <div className="flex items-center gap-3 w-full px-2">
@@ -6335,7 +8208,7 @@ function ProfilePhotoCropper({
         <input
           data-ocid="profile_setup.crop.slider"
           type="range"
-          min={1}
+          min={0.5}
           max={3}
           step={0.05}
           value={zoom}
@@ -7180,6 +9053,466 @@ function ClientProfileSetup({ data, onDone }: ClientProfileSetupProps) {
   );
 }
 
+// ─── Calendar Page ────────────────────────────────────────────────────────────
+
+function CalendarPage({
+  user,
+  onBack,
+  onLogout,
+}: {
+  user: StoredUser | null;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  const profile = user ? loadProfile(user.mobile) : null;
+  const role = user?.role ?? "client";
+  const userId = user?.mobile ?? "";
+
+  // Start of the currently displayed month
+  const [currentMonth, setCurrentMonth] = useState<Date>(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // All upcoming hearings (for the upcoming section above calendar)
+  const upcomingHearings = user ? getAllUpcomingHearings(userId, role) : [];
+
+  // Today, tomorrow, nextWeek boundaries
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const tomorrowDate = new Date(todayDate);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const nextWeekDate = new Date(todayDate);
+  nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+
+  const upcomingGroups: { label: string; items: StoredCase[] }[] = [
+    {
+      label: "Today",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === todayDate.getTime();
+      }),
+    },
+    {
+      label: "Tomorrow",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d.getTime() === tomorrowDate.getTime();
+      }),
+    },
+    {
+      label: "Next 7 Days",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > tomorrowDate && d <= nextWeekDate;
+      }),
+    },
+    {
+      label: "Later",
+      items: upcomingHearings.filter((c) => {
+        const d = new Date(`${c.nextHearingDate}T00:00:00`);
+        return d > nextWeekDate;
+      }),
+    },
+  ];
+
+  // Build calendar grid for currentMonth
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+
+  const firstDayOfMonth = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Pad with 0s at start and end so we have complete weeks
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDayOfMonth; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    weeks.push(cells.slice(i, i + 7));
+  }
+
+  function toDateStr(day: number): string {
+    return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function handleDateClick(day: number) {
+    const dateStr = toDateStr(day);
+    const hearingsOnDay = getHearingsForDate(userId, role, dateStr);
+    if (hearingsOnDay.length === 0) return;
+    setSelectedDate(dateStr);
+    setSheetOpen(true);
+  }
+
+  function prevMonth() {
+    setCurrentMonth((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() - 1);
+      return d;
+    });
+  }
+
+  function nextMonth() {
+    setCurrentMonth((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() + 1);
+      return d;
+    });
+  }
+
+  const monthLabel = currentMonth.toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+
+  const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Selected date hearings for sheet
+  const sheetHearings = selectedDate
+    ? getHearingsForDate(userId, role, selectedDate)
+    : [];
+
+  const sheetDateLabel = selectedDate
+    ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "";
+
+  const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
+
+  return (
+    <div
+      data-ocid="calendar.section"
+      className="flex flex-col min-h-screen bg-background"
+    >
+      <PageHeader
+        user={user}
+        profile={profile}
+        onBack={onBack}
+        onLogout={onLogout}
+        backLabel="Back to Dashboard"
+      />
+
+      <main className="flex flex-col flex-1 overflow-y-auto pb-8">
+        {/* ── Upcoming Hearings Section (above calendar) ── */}
+        <div className="px-5 pt-3 pb-4">
+          <h1 className="text-lg font-bold text-foreground mb-1">
+            Hearing Calendar
+          </h1>
+          <p className="text-xs text-muted-foreground mb-4">
+            {upcomingHearings.length} upcoming hearing
+            {upcomingHearings.length !== 1 ? "s" : ""}
+          </p>
+
+          {/* Upcoming groups */}
+          {upcomingHearings.length === 0 ? (
+            <div
+              data-ocid="calendar.upcoming.empty_state"
+              className="bg-white rounded-2xl border border-border p-5 text-center mb-4"
+            >
+              <CalendarDays className="w-10 h-10 text-muted-foreground/20 mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">
+                No upcoming hearings. Add hearing dates to your cases.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 mb-4">
+              {upcomingGroups.map((group) => {
+                if (group.items.length === 0) return null;
+                return (
+                  <div key={group.label}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                        {group.label}
+                      </span>
+                      <span className="text-[10px] font-semibold bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">
+                        {group.items.length}
+                      </span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {group.items.map((c, idx) => {
+                        const clientData = loadAllClientData().find(
+                          (cd) => cd.userId === c.clientId,
+                        );
+                        const clientProfile = loadProfile(c.clientId);
+                        const clientName =
+                          clientProfile?.fullName ||
+                          clientData?.name ||
+                          "Client";
+                        const hearingInfo = getHearingLabel(c.nextHearingDate);
+                        return (
+                          <div
+                            key={c.id}
+                            data-ocid={`calendar.upcoming.item.${idx + 1}`}
+                            className="bg-white rounded-xl border border-border shadow-sm p-3 flex flex-col gap-1.5"
+                          >
+                            {role === "advocate" && (
+                              <p className="text-[10px] font-medium text-muted-foreground">
+                                Client: {clientName}
+                              </p>
+                            )}
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-bold text-foreground leading-snug flex-1 min-w-0 truncate">
+                                {c.caseTitle}
+                              </p>
+                              <span
+                                className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+                              >
+                                {c.caseStatus}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <Building2 className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{c.courtName}</span>
+                            </div>
+                            <span
+                              className={`self-start inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${hearingInfo.color}`}
+                            >
+                              <Calendar className="w-2.5 h-2.5" />
+                              {hearingInfo.label} ·{" "}
+                              {new Date(
+                                `${c.nextHearingDate}T00:00:00`,
+                              ).toLocaleDateString("en-IN", {
+                                day: "numeric",
+                                month: "short",
+                              })}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Calendar Grid ── */}
+          <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+            {/* Month navigation */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <button
+                data-ocid="calendar.prev_month.button"
+                type="button"
+                onClick={prevMonth}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-sm font-bold text-foreground">
+                {monthLabel}
+              </span>
+              <button
+                data-ocid="calendar.next_month.button"
+                type="button"
+                onClick={nextMonth}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Next month"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Day-of-week header */}
+            <div className="grid grid-cols-7 border-b border-border">
+              {DOW_LABELS.map((dow) => (
+                <div
+                  key={dow}
+                  className="flex items-center justify-center py-2 text-[10px] font-semibold text-muted-foreground"
+                >
+                  {dow}
+                </div>
+              ))}
+            </div>
+
+            {/* Calendar cells */}
+            <div className="p-1">
+              {weeks.map((week) => {
+                const weekKey =
+                  week.find((d) => d !== null) ?? `w${year}${month}`;
+                return (
+                  <div
+                    key={`week-${year}-${month}-${weekKey}`}
+                    className="grid grid-cols-7"
+                  >
+                    {week.map((day, di) => {
+                      if (day === null) {
+                        return (
+                          <div
+                            key={`empty-${year}-${month}-col${di}-wk${weekKey}`}
+                            className="h-10"
+                          />
+                        );
+                      }
+                      const dateStr = toDateStr(day);
+                      const hearingsCount = getHearingsForDate(
+                        userId,
+                        role,
+                        dateStr,
+                      ).length;
+                      const isToday = dateStr === todayStr;
+                      const hasHearings = hearingsCount > 0;
+
+                      return (
+                        <button
+                          key={dateStr}
+                          data-ocid="calendar.date.button"
+                          type="button"
+                          onClick={() => handleDateClick(day)}
+                          disabled={!hasHearings}
+                          className={`relative h-10 flex flex-col items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                            hasHearings
+                              ? "cursor-pointer hover:bg-primary/5 active:bg-primary/10"
+                              : "cursor-default"
+                          }`}
+                          aria-label={`${dateStr}${hasHearings ? `, ${hearingsCount} hearing${hearingsCount > 1 ? "s" : ""}` : ""}`}
+                        >
+                          {/* Date number */}
+                          <span
+                            className={`text-xs font-semibold leading-none flex items-center justify-center w-6 h-6 rounded-full transition-colors ${
+                              isToday
+                                ? "bg-primary text-primary-foreground font-bold"
+                                : hasHearings
+                                  ? "text-foreground"
+                                  : "text-muted-foreground"
+                            }`}
+                          >
+                            {day}
+                          </span>
+
+                          {/* Dot + badge for hearings */}
+                          {hasHearings && (
+                            <div className="flex items-center gap-0.5 mt-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-primary block" />
+                              {hearingsCount > 1 && (
+                                <span className="text-[8px] font-bold bg-primary text-primary-foreground px-1 rounded-full leading-none py-0.5">
+                                  {hearingsCount}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center gap-3 px-4 py-2.5 border-t border-border bg-muted/30">
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                  <span className="text-[9px] font-bold text-primary-foreground">
+                    5
+                  </span>
+                </div>
+                <span className="text-[10px] text-muted-foreground">Today</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                <span className="text-[10px] text-muted-foreground">
+                  Has hearings
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] font-bold bg-primary text-primary-foreground px-1 rounded-full py-0.5">
+                  3
+                </span>
+                <span className="text-[10px] text-muted-foreground">Count</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* ── Bottom Sheet for day's hearings ── */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent
+          data-ocid="calendar.sheet"
+          side="bottom"
+          className="rounded-t-2xl max-h-[70vh] flex flex-col p-0"
+        >
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border shrink-0">
+            <div className="flex items-start justify-between gap-2">
+              <SheetTitle className="text-sm font-bold text-foreground leading-snug">
+                Hearings on {sheetDateLabel}
+              </SheetTitle>
+              <button
+                data-ocid="calendar.sheet.close_button"
+                type="button"
+                onClick={() => setSheetOpen(false)}
+                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring -mt-0.5"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground text-left">
+              {sheetHearings.length} hearing
+              {sheetHearings.length !== 1 ? "s" : ""} scheduled
+            </p>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+            {sheetHearings.map((c, idx) => {
+              const clientData = loadAllClientData().find(
+                (cd) => cd.userId === c.clientId,
+              );
+              const clientProfile = loadProfile(c.clientId);
+              const clientName =
+                clientProfile?.fullName || clientData?.name || "Client";
+              return (
+                <div
+                  key={c.id}
+                  data-ocid={`calendar.sheet.item.${idx + 1}`}
+                  className="bg-muted/30 rounded-xl border border-border p-3 flex flex-col gap-1.5"
+                >
+                  {role === "advocate" && (
+                    <p className="text-[10px] font-medium text-muted-foreground">
+                      Client: {clientName}
+                    </p>
+                  )}
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-bold text-foreground leading-snug flex-1 min-w-0">
+                      {c.caseTitle}
+                    </p>
+                    <span
+                      className={`shrink-0 inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${getCaseStatusColor(c.caseStatus)}`}
+                    >
+                      {c.caseStatus}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Building2 className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{c.courtName}</span>
+                  </div>
+                  {c.caseNumber && (
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      {c.caseNumber}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
 // ─── Profile Setup Screen (wrapper) ──────────────────────────────────────────
 
 function ProfileSetupScreen({
@@ -7210,6 +9543,867 @@ function RedirectToDashboard({ onRedirect }: { onRedirect: () => void }) {
   return null;
 }
 
+// ─── Find Advocates Page ──────────────────────────────────────────────────────
+
+const EXPERIENCE_RANGES = [
+  { label: "0–5 years", min: 0, max: 5 },
+  { label: "5–10 years", min: 5, max: 10 },
+  { label: "10+ years", min: 10, max: Number.POSITIVE_INFINITY },
+] as const;
+
+function FindAdvocatesPage({
+  user,
+  onBack,
+  onLogout,
+  onViewAdvocate,
+}: {
+  user: StoredUser | null;
+  onBack: () => void;
+  onLogout: () => void;
+  onViewAdvocate: (advocateUserId: string) => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterPracticeArea, setFilterPracticeArea] = useState("all");
+  const [filterCity, setFilterCity] = useState("");
+  const [filterCourt, setFilterCourt] = useState("");
+  const [filterExpRange, setFilterExpRange] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const allAdvocates = useMemo(() => {
+    const allAdv = loadAllAdvocateData();
+    const results: Array<{ advData: AdvocateData; profile: StoredProfile }> =
+      [];
+    for (const adv of allAdv) {
+      if (adv.userId === user?.mobile) continue;
+      const profile = loadProfile(adv.userId);
+      if (!profile) continue;
+      results.push({ advData: adv, profile });
+    }
+    return results;
+  }, [user?.mobile]);
+
+  const clientData =
+    user?.role === "client"
+      ? (loadAllClientData().find((c) => c.userId === user.mobile) ?? null)
+      : null;
+
+  function isConnected(advData: AdvocateData): boolean {
+    if (!clientData?.linkedAdvocateId) return false;
+    return (
+      clientData.linkedAdvocateId.toUpperCase() ===
+      advData.referralCode.toUpperCase()
+    );
+  }
+
+  const filtered = useMemo(() => {
+    return allAdvocates.filter(({ advData: _adv, profile }) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (q) {
+        const nameMatch = profile.fullName.toLowerCase().includes(q);
+        const cityMatch = (profile.city || "").toLowerCase().includes(q);
+        const courtMatch = (profile.courtName || "").toLowerCase().includes(q);
+        const practiceMatch = (profile.practiceArea || "")
+          .toLowerCase()
+          .includes(q);
+        if (!nameMatch && !cityMatch && !courtMatch && !practiceMatch)
+          return false;
+      }
+      if (
+        filterPracticeArea !== "all" &&
+        profile.practiceArea !== filterPracticeArea
+      )
+        return false;
+      if (
+        filterCity.trim() &&
+        !(profile.city || "")
+          .toLowerCase()
+          .includes(filterCity.toLowerCase().trim())
+      )
+        return false;
+      if (
+        filterCourt.trim() &&
+        !(profile.courtName || "")
+          .toLowerCase()
+          .includes(filterCourt.toLowerCase().trim())
+      )
+        return false;
+      if (filterExpRange !== "all") {
+        const range = EXPERIENCE_RANGES.find((r) => r.label === filterExpRange);
+        if (range) {
+          const exp = Number(profile.yearsExp) || 0;
+          if (exp < range.min || exp > range.max) return false;
+        }
+      }
+      return true;
+    });
+  }, [
+    allAdvocates,
+    searchQuery,
+    filterPracticeArea,
+    filterCity,
+    filterCourt,
+    filterExpRange,
+  ]);
+
+  const activeFilterCount = [
+    filterPracticeArea !== "all",
+    filterCity.trim() !== "",
+    filterCourt.trim() !== "",
+    filterExpRange !== "all",
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    setFilterPracticeArea("all");
+    setFilterCity("");
+    setFilterCourt("");
+    setFilterExpRange("all");
+  }
+
+  const currentProfile = user ? loadProfile(user.mobile) : null;
+  const displayName = currentProfile?.fullName || "User";
+  const initials = displayName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div
+      data-ocid="find-advocates.section"
+      className="flex flex-col min-h-screen bg-background"
+    >
+      {/* Header */}
+      <header className="sticky top-0 z-10 flex items-center justify-between w-full px-5 py-3 border-b border-border bg-white shadow-sm">
+        <button
+          data-ocid="find-advocates.header.link"
+          type="button"
+          aria-label="My Advocate – home"
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+          onClick={onBack}
+        >
+          <img
+            src="/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png"
+            alt="My Advocate"
+            style={{ height: 44, width: "auto" }}
+            className="object-contain"
+            draggable={false}
+          />
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            data-ocid="find-advocates.profile.button"
+            type="button"
+            className="w-10 h-10 rounded-full overflow-hidden border-2 border-border hover:border-primary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="User profile"
+          >
+            {currentProfile?.profilePhoto ? (
+              <img
+                src={currentProfile.profilePhoto}
+                alt={displayName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                <span className="text-xs font-bold text-primary leading-none">
+                  {initials}
+                </span>
+              </div>
+            )}
+          </button>
+          <button
+            data-ocid="find-advocates.logout.button"
+            type="button"
+            onClick={onLogout}
+            className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+
+      <main className="flex flex-col flex-1 overflow-y-auto">
+        {/* Page title + back */}
+        <div className="px-5 pt-5 pb-4">
+          <BackButton
+            ocid="find-advocates.back.button"
+            onClick={onBack}
+            label="Back to Dashboard"
+          />
+          <div className="mt-3 flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Search className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground tracking-tight leading-tight">
+                Find Advocates
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {allAdvocates.length} advocate
+                {allAdvocates.length !== 1 ? "s" : ""} registered
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Search bar */}
+        <div className="px-5 pb-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            <input
+              data-ocid="find-advocates.search_input"
+              type="text"
+              placeholder="Search by name, city, court, practice area..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 h-12 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filters toggle */}
+        <div className="px-5 pb-3 flex items-center gap-2">
+          <button
+            data-ocid="find-advocates.filter.toggle"
+            type="button"
+            onClick={() => setShowFilters((v) => !v)}
+            className={`flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              showFilters || activeFilterCount > 0
+                ? "border-primary bg-primary/5 text-primary"
+                : "border-border bg-white text-muted-foreground hover:text-foreground hover:border-ring/50"
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+            <ChevronDown
+              className={`w-3.5 h-3.5 ml-1 transition-transform duration-200 ${
+                showFilters ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          {activeFilterCount > 0 && (
+            <button
+              data-ocid="find-advocates.clear_filters.button"
+              type="button"
+              onClick={clearFilters}
+              className="text-xs text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none"
+            >
+              Clear all
+            </button>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground font-medium">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+
+        {/* Filter panel */}
+        {showFilters && (
+          <div className="mx-5 mb-4 p-4 bg-muted/30 rounded-2xl border border-border flex flex-col gap-3">
+            {/* Practice Area */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wide">
+                Practice Area
+              </p>
+              <Select
+                value={filterPracticeArea}
+                onValueChange={setFilterPracticeArea}
+              >
+                <SelectTrigger
+                  data-ocid="find-advocates.practice_area.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="All practice areas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All practice areas</SelectItem>
+                  {PRACTICE_AREAS.map((pa) => (
+                    <SelectItem key={pa} value={pa}>
+                      {pa}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* City */}
+            <div>
+              <label
+                htmlFor="filter-city"
+                className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wide"
+              >
+                City
+              </label>
+              <input
+                id="filter-city"
+                data-ocid="find-advocates.city.input"
+                type="text"
+                placeholder="Filter by city..."
+                value={filterCity}
+                onChange={(e) => setFilterCity(e.target.value)}
+                className="w-full h-10 px-3 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+              />
+            </div>
+
+            {/* Court */}
+            <div>
+              <label
+                htmlFor="filter-court"
+                className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wide"
+              >
+                Court
+              </label>
+              <input
+                id="filter-court"
+                data-ocid="find-advocates.court.input"
+                type="text"
+                placeholder="Filter by court name..."
+                value={filterCourt}
+                onChange={(e) => setFilterCourt(e.target.value)}
+                className="w-full h-10 px-3 text-sm rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground"
+              />
+            </div>
+
+            {/* Experience Range */}
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wide">
+                Experience
+              </p>
+              <Select value={filterExpRange} onValueChange={setFilterExpRange}>
+                <SelectTrigger
+                  data-ocid="find-advocates.experience.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="Any experience" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Any experience</SelectItem>
+                  {EXPERIENCE_RANGES.map((r) => (
+                    <SelectItem key={r.label} value={r.label}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {/* Advocate card list */}
+        <div className="px-5 pb-8 flex flex-col gap-3">
+          {filtered.length === 0 ? (
+            <div
+              data-ocid="find-advocates.empty_state"
+              className="flex flex-col items-center justify-center py-16 text-center"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                <Users className="w-8 h-8 text-muted-foreground" />
+              </div>
+              <p className="text-base font-semibold text-foreground">
+                No advocates found
+              </p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-[240px]">
+                {activeFilterCount > 0 || searchQuery
+                  ? "Try adjusting your search or filters."
+                  : "No advocates are registered yet."}
+              </p>
+              {(activeFilterCount > 0 || searchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearFilters();
+                    setSearchQuery("");
+                  }}
+                  className="mt-4 text-sm text-primary hover:underline focus-visible:outline-none"
+                >
+                  Clear search & filters
+                </button>
+              )}
+            </div>
+          ) : (
+            filtered.map(({ advData, profile }, idx) => {
+              const connected = isConnected(advData);
+              const exp = profile.yearsExp
+                ? `${profile.yearsExp} yr${Number(profile.yearsExp) !== 1 ? "s" : ""}`
+                : null;
+              const initials2 = profile.fullName
+                .split(" ")
+                .map((w) => w[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase();
+              return (
+                <button
+                  key={advData.userId}
+                  data-ocid={`find-advocates.item.${idx + 1}`}
+                  type="button"
+                  onClick={() => onViewAdvocate(advData.userId)}
+                  className="w-full text-left flex items-center gap-3.5 p-4 bg-white rounded-2xl border border-border shadow-sm hover:border-primary/40 hover:shadow-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {/* Avatar */}
+                  <div className="shrink-0 w-14 h-14 rounded-full overflow-hidden border-2 border-border bg-primary/5">
+                    {profile.profilePhoto ? (
+                      <img
+                        src={profile.profilePhoto}
+                        alt={profile.fullName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <span className="text-base font-bold text-primary">
+                          {initials2}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-bold text-foreground truncate">
+                        {profile.fullName}
+                      </p>
+                      {connected && (
+                        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Connected
+                        </span>
+                      )}
+                    </div>
+                    {profile.practiceArea && (
+                      <span className="inline-block mt-0.5 text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                        {profile.practiceArea}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {profile.city && (
+                        <span className="text-xs text-muted-foreground">
+                          {profile.city}
+                        </span>
+                      )}
+                      {profile.city && exp && (
+                        <span className="text-muted-foreground text-xs">·</span>
+                      )}
+                      {exp && (
+                        <span className="text-xs text-muted-foreground">
+                          {exp} exp.
+                        </span>
+                      )}
+                    </div>
+                    {profile.courtName && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        {profile.courtName}
+                      </p>
+                    )}
+                  </div>
+
+                  <ChevronRight className="shrink-0 w-4 h-4 text-muted-foreground" />
+                </button>
+              );
+            })
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── Advocate Discovery Profile Page ──────────────────────────────────────────
+
+function AdvocateDiscoveryProfilePage({
+  advocateUserId,
+  user,
+  onBack,
+  onLogout,
+}: {
+  advocateUserId: string;
+  user: StoredUser | null;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  const profile = loadProfile(advocateUserId);
+  const advData = loadAllAdvocateData().find(
+    (a) => a.userId === advocateUserId,
+  );
+
+  const [referralCode, setReferralCode] = useState("");
+  const [referralError, setReferralError] = useState("");
+  const [showReferral, setShowReferral] = useState(false);
+  const [connected, setConnected] = useState(() => {
+    if (!user || user.role !== "client") return false;
+    const cd = loadAllClientData().find((c) => c.userId === user.mobile);
+    if (!cd?.linkedAdvocateId || !advData) return false;
+    return (
+      cd.linkedAdvocateId.toUpperCase() === advData.referralCode.toUpperCase()
+    );
+  });
+
+  if (!profile || !advData) {
+    return (
+      <div className="flex flex-col flex-1 items-center justify-center px-6 py-12">
+        <p className="text-muted-foreground text-sm">
+          Advocate profile not found.
+        </p>
+        <Button type="button" onClick={onBack} className="mt-4">
+          Go Back
+        </Button>
+      </div>
+    );
+  }
+
+  const displayInitials = profile.fullName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  const isClient = user?.role === "client";
+  const isAdvocateUser = user?.role === "advocate";
+
+  function handleConnect() {
+    if (!user || !isClient) return;
+    const cd = loadAllClientData().find((c) => c.userId === user.mobile);
+    saveClientData({
+      userId: user.mobile,
+      name: cd?.name || user.mobile,
+      linkedAdvocateId: advData!.referralCode,
+    });
+    setConnected(true);
+    toast.success(`Connected with ${profile!.fullName}!`);
+  }
+
+  function handleReferralConnect(e: React.FormEvent) {
+    e.preventDefault();
+    setReferralError("");
+    const found = findAdvocateByCode(referralCode.trim());
+    if (!found) {
+      setReferralError("Invalid referral code. Please check and try again.");
+      return;
+    }
+    if (found.userId !== advocateUserId) {
+      setReferralError("This code belongs to a different advocate.");
+      return;
+    }
+    const cd = loadAllClientData().find((c) => c.userId === user!.mobile);
+    saveClientData({
+      userId: user!.mobile,
+      name: cd?.name || user!.mobile,
+      linkedAdvocateId: found.referralCode,
+    });
+    setConnected(true);
+    toast.success(`Connected with ${profile!.fullName} via referral code!`);
+    setShowReferral(false);
+    setReferralCode("");
+  }
+
+  const currentUserProfile = user ? loadProfile(user.mobile) : null;
+  const currentUserDisplayName = currentUserProfile?.fullName || "User";
+  const currentUserInitials = currentUserDisplayName
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div
+      data-ocid="advocate-discovery-profile.section"
+      className="flex flex-col min-h-screen bg-background"
+    >
+      {/* Header */}
+      <header className="sticky top-0 z-10 flex items-center justify-between w-full px-5 py-3 border-b border-border bg-white shadow-sm">
+        <button
+          data-ocid="advocate-discovery-profile.header.link"
+          type="button"
+          onClick={onBack}
+          aria-label="My Advocate – home"
+          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+        >
+          <img
+            src="/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png"
+            alt="My Advocate"
+            style={{ height: 44, width: "auto" }}
+            className="object-contain"
+            draggable={false}
+          />
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            data-ocid="advocate-discovery-profile.profile.button"
+            type="button"
+            className="w-10 h-10 rounded-full overflow-hidden border-2 border-border hover:border-primary/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="User profile"
+          >
+            {currentUserProfile?.profilePhoto ? (
+              <img
+                src={currentUserProfile.profilePhoto}
+                alt={currentUserDisplayName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                <span className="text-xs font-bold text-primary leading-none">
+                  {currentUserInitials}
+                </span>
+              </div>
+            )}
+          </button>
+          <button
+            data-ocid="advocate-discovery-profile.logout.button"
+            type="button"
+            onClick={onLogout}
+            className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Sign out
+          </button>
+        </div>
+      </header>
+
+      <main className="flex flex-col flex-1 overflow-y-auto pb-10">
+        {/* Back button */}
+        <div className="px-5 pt-5 pb-2">
+          <BackButton
+            ocid="advocate-discovery-profile.back.button"
+            onClick={onBack}
+            label="Back to Find Advocates"
+          />
+        </div>
+
+        {/* Cover photo */}
+        <div
+          className="relative w-full overflow-hidden shrink-0 bg-gradient-to-r from-primary/80 to-primary"
+          style={{ height: 180 }}
+        >
+          {profile.coverPhoto ? (
+            <img
+              src={profile.coverPhoto}
+              alt="Cover"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center opacity-10">
+              <Scale className="w-16 h-16 text-white" />
+            </div>
+          )}
+        </div>
+
+        {/* Avatar + name */}
+        <div className="flex flex-col items-center px-6 pb-4">
+          <div className="w-[110px] h-[110px] rounded-full border-4 border-white shadow-lg bg-white overflow-hidden -mt-[55px]">
+            {profile.profilePhoto ? (
+              <img
+                src={profile.profilePhoto}
+                alt={profile.fullName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                <span className="text-2xl font-bold text-primary">
+                  {displayInitials}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 text-center w-full">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <h1 className="text-xl font-bold text-foreground tracking-tight">
+                {profile.fullName}
+              </h1>
+              {connected && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Connected
+                </span>
+              )}
+              {isAdvocateUser && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  <Users className="w-3.5 h-3.5" />
+                  Network
+                </span>
+              )}
+            </div>
+
+            {profile.practiceArea && (
+              <span className="inline-block mt-1.5 text-xs font-semibold text-primary bg-primary/10 px-3 py-1 rounded-full">
+                {profile.practiceArea}
+              </span>
+            )}
+
+            <div className="flex items-center justify-center gap-2 mt-2 flex-wrap text-xs text-muted-foreground">
+              {profile.courtName && <span>{profile.courtName}</span>}
+              {profile.courtName && (profile.city || profile.state) && (
+                <span>·</span>
+              )}
+              {(profile.city || profile.state) && (
+                <span>
+                  {[profile.city, profile.state].filter(Boolean).join(", ")}
+                </span>
+              )}
+            </div>
+
+            {profile.yearsExp && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {profile.yearsExp}{" "}
+                {Number(profile.yearsExp) === 1 ? "year" : "years"} of
+                experience
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Connect actions — only for clients who are NOT yet connected */}
+        {isClient && !connected && (
+          <div className="px-5 pb-4 flex flex-col gap-3">
+            <Button
+              data-ocid="advocate-discovery-profile.connect.primary_button"
+              type="button"
+              onClick={handleConnect}
+              className="h-12 text-base font-semibold w-full rounded-xl"
+            >
+              Connect with {profile.fullName.split(" ")[0]}
+            </Button>
+
+            <button
+              data-ocid="advocate-discovery-profile.referral.toggle"
+              type="button"
+              onClick={() => setShowReferral((v) => !v)}
+              className="flex items-center justify-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none"
+            >
+              <span>Enter Referral Code instead</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  showReferral ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {showReferral && (
+              <form
+                onSubmit={handleReferralConnect}
+                className="flex flex-col gap-2"
+              >
+                <div className="flex gap-2">
+                  <input
+                    data-ocid="advocate-discovery-profile.referral.input"
+                    type="text"
+                    placeholder="e.g. ADV-7F3K9"
+                    value={referralCode}
+                    onChange={(e) => {
+                      setReferralCode(e.target.value.toUpperCase());
+                      setReferralError("");
+                    }}
+                    className="flex-1 h-11 px-3 text-sm font-mono rounded-xl border border-input bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring placeholder:text-muted-foreground placeholder:font-sans"
+                  />
+                  <Button
+                    data-ocid="advocate-discovery-profile.referral.submit_button"
+                    type="submit"
+                    className="h-11 px-4 text-sm font-semibold rounded-xl"
+                  >
+                    Apply
+                  </Button>
+                </div>
+                {referralError && (
+                  <p
+                    data-ocid="advocate-discovery-profile.referral.error_state"
+                    className="text-destructive text-xs"
+                  >
+                    {referralError}
+                  </p>
+                )}
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* Divider */}
+        <div className="mx-5 h-px bg-border mb-5" />
+
+        {/* Profile details */}
+        <div className="px-5 flex flex-col gap-4">
+          {profile.bio && (
+            <div>
+              <h2 className="text-sm font-bold text-foreground mb-1.5">
+                About
+              </h2>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {profile.bio}
+              </p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            {profile.practiceArea && (
+              <div className="bg-muted/30 rounded-xl p-3 border border-border">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Practice Area
+                </p>
+                <p className="text-sm font-semibold text-foreground">
+                  {profile.practiceArea}
+                </p>
+              </div>
+            )}
+            {profile.yearsExp && (
+              <div className="bg-muted/30 rounded-xl p-3 border border-border">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Experience
+                </p>
+                <p className="text-sm font-semibold text-foreground">
+                  {profile.yearsExp} years
+                </p>
+              </div>
+            )}
+            {profile.courtName && (
+              <div className="bg-muted/30 rounded-xl p-3 border border-border">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Court
+                </p>
+                <p className="text-sm font-semibold text-foreground">
+                  {profile.courtName}
+                </p>
+              </div>
+            )}
+            {(profile.city || profile.state) && (
+              <div className="bg-muted/30 rounded-xl p-3 border border-border">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Location
+                </p>
+                <p className="text-sm font-semibold text-foreground">
+                  {[profile.city, profile.state].filter(Boolean).join(", ")}
+                </p>
+              </div>
+            )}
+            {profile.barCouncilNumber && (
+              <div className="bg-muted/30 rounded-xl p-3 border border-border col-span-2">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Bar Council No.
+                </p>
+                <p className="text-sm font-semibold text-foreground font-mono">
+                  {profile.barCouncilNumber}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -7226,6 +10420,14 @@ export default function App() {
   const [selectedAdvocateId, setSelectedAdvocateId] = useState<string | null>(
     null,
   );
+  const [chatPartnerId, setChatPartnerId] = useState<string | null>(null);
+  const [selectedDiscoveryAdvocateId, setSelectedDiscoveryAdvocateId] =
+    useState<string | null>(null);
+
+  // Seed sample advocates once on first mount
+  useEffect(() => {
+    seedSampleAdvocates();
+  }, []);
 
   function handleRegister(data: PendingProfileData) {
     setPendingProfileData(data);
@@ -7262,7 +10464,13 @@ export default function App() {
     setCurrentUser(null);
     setPendingProfileData(null);
     setRegisteredRole(null);
+    setChatPartnerId(null);
     setScreen("login");
+  }
+
+  function openChat(partnerId: string) {
+    setChatPartnerId(partnerId);
+    setScreen("chat");
   }
 
   return (
@@ -7367,6 +10575,16 @@ export default function App() {
             user={currentUser}
             onBack={() => setScreen("dashboard")}
             onLogout={handleLogout}
+            onOpenChat={openChat}
+          />
+        )}
+
+        {screen === "chat" && chatPartnerId && (
+          <ChatScreen
+            user={currentUser}
+            partnerUserId={chatPartnerId}
+            onBack={() => setScreen("messages")}
+            onLogout={handleLogout}
           />
         )}
 
@@ -7379,6 +10597,7 @@ export default function App() {
               setSelectedClientUserId(id);
               setScreen("client-profile");
             }}
+            onMessageClient={openChat}
           />
         )}
         {screen === "my-clients" && currentUser?.role !== "advocate" && (
@@ -7391,6 +10610,7 @@ export default function App() {
             user={currentUser}
             onBack={() => setScreen("my-clients")}
             onLogout={handleLogout}
+            onMessageClient={openChat}
           />
         )}
 
@@ -7400,19 +10620,47 @@ export default function App() {
             user={currentUser}
             onBack={() => setScreen("my-profile")}
             onLogout={handleLogout}
+            onMessageAdvocate={openChat}
           />
         )}
 
-        {screen === "hearings" && currentUser?.role === "advocate" && (
+        {screen === "hearings" && (
           <HearingsPage
             user={currentUser}
             onBack={() => setScreen("dashboard")}
             onLogout={handleLogout}
           />
         )}
-        {screen === "hearings" && currentUser?.role !== "advocate" && (
-          <RedirectToDashboard onRedirect={() => setScreen("dashboard")} />
+
+        {screen === "calendar" && (
+          <CalendarPage
+            user={currentUser}
+            onBack={() => setScreen("dashboard")}
+            onLogout={handleLogout}
+          />
         )}
+
+        {screen === "find-advocates" && (
+          <FindAdvocatesPage
+            user={currentUser}
+            onBack={() => setScreen("dashboard")}
+            onLogout={handleLogout}
+            onViewAdvocate={(id) => {
+              setSelectedDiscoveryAdvocateId(id);
+              setScreen("advocate-discovery-profile");
+            }}
+          />
+        )}
+
+        {screen === "advocate-discovery-profile" &&
+          selectedDiscoveryAdvocateId && (
+            <AdvocateDiscoveryProfilePage
+              advocateUserId={selectedDiscoveryAdvocateId}
+              user={currentUser}
+              onBack={() => setScreen("find-advocates")}
+              onLogout={handleLogout}
+            />
+          )}
       </div>
     </div>
   );
