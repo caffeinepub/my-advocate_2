@@ -1,42 +1,54 @@
 # My Advocate
 
 ## Current State
-The app is a full-stack legal networking platform with the following working features:
-- Splash screen, Login (password + OTP), Forgot Password
-- Role selection (Advocate / Client), Registration forms with OTP verification
-- Profile setup (mandatory, with photo crop)
-- Dashboard (grid of icon cards — currently cleared/blank in v23)
-- My Profile, My Cases, Hearings, Calendar, My Clients, Messages/Chat, Find Advocates, Legal Feed pages
-- All data stored in localStorage (demo mode)
-- All existing pages are rendered via a `Screen` union type + conditional rendering in App.tsx
+
+The app has a full AppShell with a side drawer (hamburger menu). The side drawer currently handles only two items functionally:
+- "My Profile" → switches to the `profile` tab
+- "Notifications" → switches to the `notifications` tab
+
+All other items (Hearing Calendar, Documents, Case Statistics, Settings, Help) show a "Coming soon" toast. The drawer icons are plain gray with no color differentiation. There is no "View Profile" quick-link in the drawer header. Settings and Help pages do not exist.
+
+All major tab pages already exist as React components:
+- `CasesTab` (handles My Cases + Hearings + Calendar sub-tabs)
+- `CalendarSubTab` + `CalendarPage`
+- `CasesTab` contains `CaseStatisticsSection` (donut chart + bar chart + stat cards)
+- `NotificationsTab`
+- `ProfileTab`
+- `MessagesTab`
+- `MyClientsTab`
+
+Documents are stored per-case via `getDocumentsForCase()` and loaded from `loadDocuments()`.
 
 ## Requested Changes (Diff)
 
 ### Add
-- **Top Header** (persistent, shown after login): hamburger menu icon (left), My Advocate logo/wordmark (center), search icon + notification bell icon (right). Header replaces the old per-page headers inside dashboard screens.
-- **Bottom Navigation Bar** (persistent, shown after login): role-specific tabs.
-  - Advocate: Home | Cases | Clients | Messages | Profile
-  - Client: Home | Cases | Messages | Find Advocates | Profile
-  - Each tab has an icon + label, active tab highlighted in primary blue.
-- **Side Drawer** (slides in from left on hamburger tap, dark backdrop overlay): contains menu items: My Profile, Hearing Calendar, Documents, Case Statistics, Notifications, Settings, Help, Logout. Shows user avatar + name at top.
-- `AppShell` wrapper component that composes TopHeader + BottomNav + SideDrawer around child content. Only shown when user is logged in and has completed profile setup.
+- **SettingsTab** component: full settings page with sections for Update Profile Photo, Update Cover Photo, Change Email, Change Mobile Number, Change Password, and Notification Preferences toggle
+- **HelpTab** component: help page with FAQ accordion, Contact Support form, Report a Problem form, and About My Advocate section
+- **"View Profile" link** in the drawer header (below user name/badge)
+- **All-Documents view**: a `DrawerDocumentsTab` component that aggregates all documents across all cases (filtered by role), with filter by document type and case, and view/download actions
 
 ### Modify
-- The `dashboard` screen state becomes the entry point after login. It now renders the `AppShell` with the active tab content instead of a grid.
-- The `Screen` type is extended to include `"shell"` as the root authenticated state (or the `dashboard` screen transitions into the shell).
-- All existing page components remain unchanged for now — they will be wired into the new navigation in subsequent steps.
+- **AppShell SideDrawer**: replace plain gray icons with colored icon containers (soft background circles per item), add "View Profile" button in header, wire all menu items to `onDrawerAction` callback instead of showing "Coming soon"
+- **App.tsx drawer handler**: map drawer actions to the correct `activeShellTab` values or new drawer-specific tabs: `calendar`, `documents`, `statistics`, `settings`, `help`
+- **activeShellTab type/routing**: add support for new pseudo-tabs: `"drawer-calendar"`, `"drawer-documents"`, `"drawer-statistics"`, `"settings"`, `"help"` so they render inside the AppShell content area
 
 ### Remove
-- Old dashboard grid of icon cards (already removed in v23 — confirm it stays gone).
-- Per-page back-to-dashboard navigation headers inside individual screens are kept for now (will be migrated in later steps).
+- `toast.info("Coming soon")` calls for all drawer items except those not yet planned
 
 ## Implementation Plan
-1. Create `AppShell` component with:
-   - `TopHeader`: fixed top bar, 56px height, white bg, logo center, hamburger left, search + bell right
-   - `BottomNav`: fixed bottom bar, role-aware tabs with icons, active state in primary blue (#2563EB)
-   - `SideDrawer`: Sheet component sliding from left, user avatar + name at top, 8 menu items with icons
-2. Wrap the authenticated `dashboard` screen with `AppShell`
-3. Bottom nav tabs each render a placeholder content area (e.g. "Home", "Cases", etc.) — existing pages NOT yet wired
-4. Side drawer logout calls existing logout handler
-5. All interactive elements get `data-ocid` markers
-6. Validate and deploy
+
+1. **AppShell.tsx**
+   - Add `onDrawerAction: (action: string) => void` prop to `AppShell` and pass it down to `SideDrawer`
+   - In `SideDrawer`, replace `handleMenuItemClick` to call `onDrawerAction(itemId)` for all items instead of showing "Coming soon"
+   - Redesign each drawer menu item row: wrap the icon in a 36×36 rounded soft-background container with per-item color (User=blue, Calendar=green, FileText=orange, BarChart2=purple, Bell=blue, Settings=slate, HelpCircle=teal)
+   - Add a "View Profile →" text button in the drawer profile header below the name/badge
+
+2. **App.tsx**
+   - Add new shell tab IDs: `"drawer-calendar"` | `"drawer-documents"` | `"drawer-statistics"` | `"settings"` | `"help"`
+   - In the `handleDrawerAction` function (new), map action strings to `setActiveShellTab(...)` calls
+   - Add render blocks for new tabs inside the AppShell children block
+   - Build `SettingsTab` component inline: sections for photo update (reuses existing crop flow), email/mobile/password change forms with validation, and notification preferences toggle
+   - Build `HelpTab` component inline: FAQ accordion (5-6 items), contact support form (name/email/message), report a problem form, and about section
+   - Build `DrawerDocumentsTab` component: loads all documents via `loadDocuments()`, filters by `advocateId` or `clientId` per role, shows cards with title/type/date/case-name, filter by docType and case, view/download buttons
+
+3. No backend changes needed. All data is already in localStorage.

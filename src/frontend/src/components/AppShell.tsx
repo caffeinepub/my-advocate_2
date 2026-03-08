@@ -40,6 +40,7 @@ interface AppShellProps {
   onLogout: () => void;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onDrawerAction: (action: string) => void;
   messageUnreadCount?: number;
   notificationUnreadCount?: number;
   networkUnreadCount?: number;
@@ -300,6 +301,8 @@ interface DrawerMenuItem {
   icon: React.ElementType;
   ocid: string;
   danger?: boolean;
+  iconBg: string;
+  iconColor: string;
 }
 
 const DRAWER_MENU_ITEMS: DrawerMenuItem[] = [
@@ -308,38 +311,57 @@ const DRAWER_MENU_ITEMS: DrawerMenuItem[] = [
     label: "My Profile",
     icon: User,
     ocid: "drawer.my_profile_button",
+    iconBg: "bg-blue-50",
+    iconColor: "text-blue-600",
   },
   {
     id: "calendar",
     label: "Hearing Calendar",
     icon: Calendar,
     ocid: "drawer.calendar_button",
+    iconBg: "bg-green-50",
+    iconColor: "text-green-600",
   },
   {
     id: "documents",
     label: "Documents",
     icon: FileText,
     ocid: "drawer.documents_button",
+    iconBg: "bg-orange-50",
+    iconColor: "text-orange-600",
   },
   {
     id: "statistics",
     label: "Case Statistics",
     icon: BarChart2,
     ocid: "drawer.statistics_button",
+    iconBg: "bg-purple-50",
+    iconColor: "text-purple-600",
   },
   {
     id: "notifications",
     label: "Notifications",
     icon: Bell,
     ocid: "drawer.notifications_button",
+    iconBg: "bg-blue-50",
+    iconColor: "text-blue-600",
   },
   {
     id: "settings",
     label: "Settings",
     icon: Settings,
     ocid: "drawer.settings_button",
+    iconBg: "bg-slate-100",
+    iconColor: "text-slate-600",
   },
-  { id: "help", label: "Help", icon: HelpCircle, ocid: "drawer.help_button" },
+  {
+    id: "help",
+    label: "Help",
+    icon: HelpCircle,
+    ocid: "drawer.help_button",
+    iconBg: "bg-teal-50",
+    iconColor: "text-teal-600",
+  },
 ];
 
 function SideDrawer({
@@ -348,16 +370,14 @@ function SideDrawer({
   userRole,
   userProfile,
   onLogout,
-  onNotificationsClick,
-  onTabChange,
+  onDrawerAction,
 }: {
   open: boolean;
   onClose: () => void;
   userRole: "advocate" | "client";
   userProfile: UserProfile | null;
   onLogout: () => void;
-  onNotificationsClick?: () => void;
-  onTabChange?: (tab: string) => void;
+  onDrawerAction: (action: string) => void;
 }) {
   const displayName = userProfile?.fullName || "User";
   const initials = getInitials(displayName);
@@ -365,13 +385,7 @@ function SideDrawer({
 
   function handleMenuItemClick(itemId: string) {
     onClose();
-    if (itemId === "notifications") {
-      onNotificationsClick?.();
-    } else if (itemId === "my-profile") {
-      onTabChange?.("profile");
-    } else if (itemId !== "logout") {
-      toast.info("Coming soon");
-    }
+    onDrawerAction(itemId);
   }
 
   function handleLogout() {
@@ -389,49 +403,65 @@ function SideDrawer({
       <SheetContent
         data-ocid="drawer.section"
         side="left"
-        className="w-[280px] max-w-[85vw] p-0 flex flex-col"
+        className="w-[280px] max-w-[85vw] p-0 flex flex-col overflow-hidden"
       >
         {/* Visually hidden title for accessibility */}
         <SheetHeader className="sr-only">
           <SheetTitle>Navigation Menu</SheetTitle>
         </SheetHeader>
 
-        {/* Profile header */}
-        <div className="px-5 pt-8 pb-5 bg-gradient-to-br from-primary/5 to-primary/10 border-b border-border">
-          <div className="flex items-center gap-3">
-            <Avatar className="w-12 h-12 border-2 border-white shadow-sm">
+        {/* ── Premium gradient header ─────────────────────────────────────── */}
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 px-5 pt-10 pb-5 shrink-0">
+          {/* Avatar + info */}
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="w-14 h-14 border-[3px] border-white/30 shadow-lg shrink-0">
               {userProfile?.profilePhoto ? (
                 <AvatarImage src={userProfile.profilePhoto} alt={displayName} />
               ) : null}
               <AvatarFallback
-                className={`${avatarColor} text-white text-sm font-bold`}
+                className={`${avatarColor} text-white text-base font-bold`}
               >
                 {initials}
               </AvatarFallback>
             </Avatar>
-            <div className="flex flex-col gap-1 min-w-0">
-              <p className="text-sm font-bold text-foreground truncate leading-tight">
+            <div className="flex flex-col gap-1.5 min-w-0">
+              <p className="text-sm font-bold text-white truncate leading-tight">
                 {displayName}
               </p>
               <Badge
-                variant="secondary"
-                className={`text-[10px] font-semibold w-fit px-2 py-0.5 ${
+                variant="outline"
+                className={`text-[10px] font-semibold w-fit px-2 py-0.5 border-white/40 ${
                   userRole === "advocate"
-                    ? "bg-primary/10 text-primary border-primary/20"
-                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    ? "text-white bg-white/15"
+                    : "text-white bg-white/15"
                 }`}
               >
                 {userRole === "advocate" ? "Advocate" : "Client"}
               </Badge>
             </div>
           </div>
+
+          {/* View Profile quick link */}
+          <button
+            data-ocid="drawer.view_profile_button"
+            type="button"
+            onClick={() => handleMenuItemClick("my-profile")}
+            className="text-xs text-white/80 font-medium hover:text-white transition-colors focus-visible:outline-none underline-offset-2 hover:underline"
+          >
+            View Profile →
+          </button>
         </div>
 
-        {/* Menu items */}
+        {/* ── Menu area ──────────────────────────────────────────────────── */}
         <nav
-          className="flex-1 overflow-y-auto py-2"
+          className="flex-1 overflow-y-auto bg-white"
           aria-label="Side navigation"
         >
+          {/* Section label */}
+          <p className="px-5 pt-4 pb-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+            Navigation
+          </p>
+
           {DRAWER_MENU_ITEMS.map((item) => {
             const Icon = item.icon;
             return (
@@ -440,25 +470,34 @@ function SideDrawer({
                 data-ocid={item.ocid}
                 type="button"
                 onClick={() => handleMenuItemClick(item.id)}
-                className="flex items-center gap-3 w-full px-5 py-3 text-sm text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                className="flex items-center gap-3 w-full px-4 py-3.5 text-sm text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
               >
-                <Icon className="w-5 h-5 text-muted-foreground shrink-0" />
-                <span className="font-medium">{item.label}</span>
+                {/* Colorful icon box */}
+                <div
+                  className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${item.iconBg}`}
+                >
+                  <Icon className={`w-[18px] h-[18px] ${item.iconColor}`} />
+                </div>
+                <span className="text-sm font-medium text-foreground">
+                  {item.label}
+                </span>
               </button>
             );
           })}
 
-          <Separator className="my-2" />
+          <Separator className="my-2 mx-4 w-auto" />
 
           {/* Logout */}
           <button
             data-ocid="drawer.logout_button"
             type="button"
             onClick={handleLogout}
-            className="flex items-center gap-3 w-full px-5 py-3 text-sm text-destructive hover:bg-destructive/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            className="flex items-center gap-3 w-full px-4 py-3.5 text-sm hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset mb-2"
           >
-            <LogOut className="w-5 h-5 shrink-0" />
-            <span className="font-semibold">Logout</span>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-red-50">
+              <LogOut className="w-[18px] h-[18px] text-red-500" />
+            </div>
+            <span className="text-sm font-medium text-destructive">Logout</span>
           </button>
         </nav>
       </SheetContent>
@@ -494,6 +533,7 @@ export function AppShell({
   onLogout,
   activeTab,
   onTabChange,
+  onDrawerAction,
   messageUnreadCount = 0,
   notificationUnreadCount = 0,
   networkUnreadCount = 0,
@@ -527,11 +567,8 @@ export function AppShell({
         userRole={userRole}
         userProfile={userProfile}
         onLogout={onLogout}
-        onNotificationsClick={() => {
-          onNotificationClick?.();
-        }}
-        onTabChange={(tab) => {
-          onTabChange(tab);
+        onDrawerAction={(action) => {
+          onDrawerAction(action);
         }}
       />
 

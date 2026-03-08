@@ -1,5 +1,11 @@
 import { AppShell } from "@/components/AppShell";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -10,6 +16,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ChartContainer,
@@ -31,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -38,10 +47,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Archive,
   ArrowLeft,
+  BarChart2,
+  Bell,
   Briefcase,
   Building2,
   Calendar,
@@ -60,8 +72,11 @@ import {
   File,
   FileText,
   Filter,
+  HelpCircle,
   ImageIcon,
+  Info,
   Lock,
+  LogOut,
   Mail,
   MessageCircle,
   Network,
@@ -73,6 +88,7 @@ import {
   Scale,
   Search,
   Send,
+  Settings,
   Share2,
   ThumbsUp,
   Trash2,
@@ -16759,6 +16775,1232 @@ function NotificationsTab({
   );
 }
 
+// ─── DrawerCalendarTab ────────────────────────────────────────────────────────
+
+function DrawerCalendarTab({
+  user,
+  onBack,
+}: {
+  user: StoredUser;
+  onBack: () => void;
+}) {
+  return (
+    <div
+      data-ocid="drawer-calendar.section"
+      className="flex flex-col bg-gray-50 min-h-full"
+    >
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white sticky top-0 z-10">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="text-base font-bold text-foreground">
+          Hearing Calendar
+        </h1>
+      </div>
+      <CalendarSubTab user={user} />
+    </div>
+  );
+}
+
+// ─── DrawerDocumentsTab ───────────────────────────────────────────────────────
+
+function getDocTypeColorDrawer(docType: string): string {
+  const map: Record<string, string> = {
+    Petition: "bg-blue-50 text-blue-700 border-blue-200",
+    Evidence: "bg-purple-50 text-purple-700 border-purple-200",
+    "Court Order": "bg-rose-50 text-rose-700 border-rose-200",
+    Affidavit: "bg-amber-50 text-amber-700 border-amber-200",
+    Other: "bg-gray-100 text-gray-600 border-gray-200",
+  };
+  return map[docType] ?? "bg-gray-100 text-gray-600 border-gray-200";
+}
+
+function DrawerDocumentsTab({
+  user,
+  onBack,
+}: {
+  user: StoredUser;
+  onBack: () => void;
+}) {
+  const [filterType, setFilterType] = useState<string>("All");
+
+  const allDocs = useMemo(() => {
+    const docs = loadDocuments();
+    if (user.role === "advocate") {
+      return docs.filter((d) => d.advocateId === user.mobile);
+    }
+    return docs.filter((d) => d.clientId === user.mobile);
+  }, [user.mobile, user.role]);
+
+  const filteredDocs = useMemo(() => {
+    if (filterType === "All") return allDocs;
+    return allDocs.filter((d) => d.docType === filterType);
+  }, [allDocs, filterType]);
+
+  function handleViewDocument(doc: StoredDocument) {
+    const blob = docBlobStore.get(doc.id);
+    if (!blob) {
+      toast.info(
+        "File preview is only available in the current session. Please re-upload the file to view it.",
+      );
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function handleDownloadDocument(doc: StoredDocument) {
+    const blob = docBlobStore.get(doc.id);
+    if (!blob) {
+      toast.info(
+        "File download is only available in the current session. Please re-upload the file to download it.",
+      );
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = doc.fileName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  const allCasesMap = useMemo(() => {
+    const cases = loadCases();
+    const map: Record<string, StoredCase> = {};
+    for (const c of cases) map[c.id] = c;
+    return map;
+  }, []);
+
+  const typeFilters = ["All", ...DOC_TYPES] as const;
+
+  return (
+    <div
+      data-ocid="drawer-documents.section"
+      className="flex flex-col bg-gray-50 min-h-full"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white sticky top-0 z-10">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="text-base font-bold text-foreground">Documents</h1>
+        <span className="ml-auto text-xs text-muted-foreground font-medium">
+          {filteredDocs.length}{" "}
+          {filteredDocs.length === 1 ? "document" : "documents"}
+        </span>
+      </div>
+
+      {/* Filter chips */}
+      <div className="bg-white border-b border-border px-4 py-3 overflow-x-auto">
+        <div className="flex gap-2 min-w-max">
+          {typeFilters.map((t) => (
+            <button
+              key={t}
+              data-ocid="drawer-documents.filter.tab"
+              type="button"
+              onClick={() => setFilterType(t)}
+              className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors whitespace-nowrap ${
+                filterType === t
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-white text-muted-foreground border-border hover:bg-muted/50"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Document list */}
+      <div className="flex-1 px-4 py-3 flex flex-col gap-3">
+        {filteredDocs.length === 0 ? (
+          <div
+            data-ocid="drawer-documents.empty_state"
+            className="flex flex-col items-center justify-center py-16 text-center"
+          >
+            <div className="w-16 h-16 rounded-2xl bg-orange-50 flex items-center justify-center mb-4">
+              <FileText className="w-8 h-8 text-orange-400" />
+            </div>
+            <p className="text-base font-semibold text-foreground">
+              No documents found
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {filterType !== "All"
+                ? `No ${filterType} documents yet.`
+                : "Documents uploaded to cases will appear here."}
+            </p>
+          </div>
+        ) : (
+          filteredDocs.map((doc, idx) => {
+            const caseRecord = allCasesMap[doc.caseId];
+            const isImage = doc.fileType.startsWith("image/");
+            const hasBlob = docBlobStore.has(doc.id);
+            return (
+              <div
+                key={doc.id}
+                data-ocid={`drawer-documents.item.${idx + 1}`}
+                className="bg-white rounded-2xl border border-border shadow-sm p-4 flex flex-col gap-3"
+              >
+                {/* Top row */}
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
+                    {isImage ? (
+                      <ImageIcon className="w-5 h-5 text-orange-500" />
+                    ) : (
+                      <FileText className="w-5 h-5 text-orange-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {doc.title}
+                    </p>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span
+                        className={`inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full border ${getDocTypeColorDrawer(doc.docType)}`}
+                      >
+                        {doc.docType}
+                      </span>
+                      {caseRecord && (
+                        <span className="text-[10px] text-muted-foreground">
+                          {caseRecord.caseNumber}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Meta row */}
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>
+                    {new Date(doc.uploadedAt).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </span>
+                  <span className="truncate max-w-[140px] text-right">
+                    by {doc.uploadedByName}
+                  </span>
+                </div>
+
+                {/* Session notice */}
+                {!hasBlob && (
+                  <p className="text-[11px] text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg">
+                    File requires re-upload to view or download
+                  </p>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleViewDocument(doc)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-border text-xs font-semibold text-foreground hover:bg-muted/50 transition-colors focus-visible:outline-none"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadDocument(doc)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary/10 border border-primary/20 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors focus-visible:outline-none"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── DrawerStatisticsTab ──────────────────────────────────────────────────────
+
+function DrawerStatisticsTab({
+  user,
+  onBack,
+}: {
+  user: StoredUser;
+  onBack: () => void;
+}) {
+  const allCasesRaw = useMemo(() => {
+    const cases = loadCases();
+    if (user.role === "advocate") {
+      return cases.filter((c) => c.advocateId === user.mobile);
+    }
+    return cases.filter((c) => c.clientId === user.mobile);
+  }, [user.mobile, user.role]);
+
+  // Resolve client names for CaseStatisticsSection
+  const allCases = useMemo(() => {
+    return allCasesRaw.map((c) => {
+      const clientProfile = loadProfile(c.clientId);
+      return {
+        ...c,
+        resolvedClientName: clientProfile?.fullName || c.clientId || "Client",
+      };
+    });
+  }, [allCasesRaw]);
+
+  // Client-specific stats summary
+  const isAdvocate = user.role === "advocate";
+
+  return (
+    <div
+      data-ocid="drawer-statistics.section"
+      className="flex flex-col bg-gray-50 min-h-full"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white sticky top-0 z-10">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="text-base font-bold text-foreground">Case Statistics</h1>
+        <div className="ml-auto w-8 h-8 rounded-xl bg-purple-50 flex items-center justify-center">
+          <BarChart2 className="w-4 h-4 text-purple-600" />
+        </div>
+      </div>
+
+      {/* Context label */}
+      <div className="bg-white border-b border-border px-4 py-2">
+        <p className="text-xs text-muted-foreground">
+          {isAdvocate
+            ? "Analytics across all your clients"
+            : "Analytics for your cases"}
+        </p>
+      </div>
+
+      <div className="px-4 py-4">
+        <CaseStatisticsSection allCases={allCases} />
+      </div>
+    </div>
+  );
+}
+
+// ─── SettingsTab ──────────────────────────────────────────────────────────────
+
+const LS_NOTIF_PREFS_PREFIX = "myadvocate_notif_prefs_";
+
+interface NotifPrefs {
+  messages: boolean;
+  caseUpdates: boolean;
+  hearingReminders: boolean;
+  postInteractions: boolean;
+}
+
+function loadNotifPrefs(mobile: string): NotifPrefs {
+  try {
+    const raw = localStorage.getItem(`${LS_NOTIF_PREFS_PREFIX}${mobile}`);
+    if (!raw)
+      return {
+        messages: true,
+        caseUpdates: true,
+        hearingReminders: true,
+        postInteractions: true,
+      };
+    return {
+      messages: true,
+      caseUpdates: true,
+      hearingReminders: true,
+      postInteractions: true,
+      ...JSON.parse(raw),
+    };
+  } catch {
+    return {
+      messages: true,
+      caseUpdates: true,
+      hearingReminders: true,
+      postInteractions: true,
+    };
+  }
+}
+
+function saveNotifPrefs(mobile: string, prefs: NotifPrefs) {
+  localStorage.setItem(
+    `${LS_NOTIF_PREFS_PREFIX}${mobile}`,
+    JSON.stringify(prefs),
+  );
+}
+
+function SettingsTab({
+  user,
+  onBack,
+}: {
+  user: StoredUser;
+  onBack: () => void;
+}) {
+  const isAdvocate = user.role === "advocate";
+  const [profile, setProfile] = useState<StoredProfile | null>(() =>
+    loadProfile(user.mobile),
+  );
+  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>(() =>
+    loadNotifPrefs(user.mobile),
+  );
+
+  // Email
+  const [emailVal, setEmailVal] = useState(
+    profile?.contactEmail ?? user.email ?? "",
+  );
+  const [emailSaving, setEmailSaving] = useState(false);
+
+  // Mobile
+  const [mobileVal, setMobileVal] = useState(user.mobile);
+
+  // Password
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+
+  // Photo crop state
+  const [changingPhoto, setChangingPhoto] = useState<
+    "profile" | "cover" | null
+  >(null);
+  const [newPhotoSrc, setNewPhotoSrc] = useState<string | null>(null);
+  const profilePhotoFileRef = useRef<HTMLInputElement>(null);
+  const coverPhotoFileRef = useRef<HTMLInputElement>(null);
+
+  function handleSaveEmail() {
+    const trimmed = emailVal.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    setEmailSaving(true);
+    setTimeout(() => {
+      if (profile) {
+        const updated = { ...profile, contactEmail: trimmed };
+        saveProfile(updated);
+        setProfile(updated);
+      }
+      setEmailSaving(false);
+      toast.success("Email updated successfully.");
+    }, 500);
+  }
+
+  function handleSavePassword() {
+    if (!currentPw) {
+      toast.error("Please enter your current password.");
+      return;
+    }
+    if (currentPw !== user.password) {
+      toast.error("Current password is incorrect.");
+      return;
+    }
+    if (newPw.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPw !== confirmPw) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    setPwSaving(true);
+    setTimeout(() => {
+      updateUserPassword(user.mobile, newPw);
+      setPwSaving(false);
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+      toast.success("Password changed successfully.");
+    }, 500);
+  }
+
+  function handleNotifToggle(key: keyof NotifPrefs, val: boolean) {
+    const updated = { ...notifPrefs, [key]: val };
+    setNotifPrefs(updated);
+    saveNotifPrefs(user.mobile, updated);
+  }
+
+  function handleProfilePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setNewPhotoSrc(ev.target?.result as string);
+      setChangingPhoto("profile");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function handleCoverPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const p = profile;
+      if (!p) return;
+      const updated = { ...p, coverPhoto: ev.target?.result as string };
+      saveProfile(updated);
+      setProfile(updated);
+      toast.success("Cover photo updated.");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function handleProfileCropDone(dataUrl: string) {
+    if (dataUrl && profile) {
+      const updated = { ...profile, profilePhoto: dataUrl };
+      saveProfile(updated);
+      setProfile(updated);
+      toast.success("Profile photo updated.");
+    }
+    setChangingPhoto(null);
+    setNewPhotoSrc(null);
+  }
+
+  const displayName = profile?.fullName || user.mobile;
+  const initials = displayName
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  // If in crop mode, show full-screen crop UI
+  if (changingPhoto === "profile" && newPhotoSrc) {
+    return (
+      <div className="flex flex-col bg-white min-h-full">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border sticky top-0 z-10 bg-white">
+          <button
+            type="button"
+            onClick={() => {
+              setChangingPhoto(null);
+              setNewPhotoSrc(null);
+            }}
+            className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground transition-colors focus-visible:outline-none"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <h1 className="text-base font-bold text-foreground">
+            Crop Profile Photo
+          </h1>
+        </div>
+        <div className="p-4 flex flex-col items-center">
+          <ProfilePhotoCropper
+            onCropped={handleProfileCropDone}
+            croppedUrl={null}
+            initialSrc={newPhotoSrc}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-ocid="settings.section"
+      className="flex flex-col bg-gray-50 min-h-full"
+    >
+      {/* Hidden file inputs */}
+      <input
+        ref={profilePhotoFileRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={handleProfilePhotoChange}
+      />
+      <input
+        ref={coverPhotoFileRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={handleCoverPhotoChange}
+      />
+
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white sticky top-0 z-10">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="text-base font-bold text-foreground">Settings</h1>
+        <div className="ml-auto w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center">
+          <Settings className="w-4 h-4 text-slate-600" />
+        </div>
+      </div>
+
+      <div className="px-4 py-4 flex flex-col gap-5">
+        {/* ── Account Section ─────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Account
+            </p>
+          </div>
+
+          {/* Profile photo */}
+          <div className="px-4 py-4 flex items-center justify-between border-b border-border">
+            <div className="flex items-center gap-3">
+              {/* Current photo preview */}
+              <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-border bg-muted shrink-0">
+                {profile?.profilePhoto ? (
+                  <img
+                    src={profile.profilePhoto}
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-700 text-sm font-bold">
+                    {initials}
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Profile Photo
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Update your profile picture
+                </p>
+              </div>
+            </div>
+            <button
+              data-ocid="settings.profile_photo_button"
+              type="button"
+              onClick={() => profilePhotoFileRef.current?.click()}
+              className="text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors focus-visible:outline-none"
+            >
+              Change
+            </button>
+          </div>
+
+          {/* Cover photo (advocate only) */}
+          {isAdvocate && (
+            <div className="px-4 py-4 flex items-center justify-between border-b border-border">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-12 h-8 rounded-lg overflow-hidden border border-border bg-gradient-to-br from-blue-500 to-blue-700 shrink-0"
+                  style={{ minWidth: 48 }}
+                >
+                  {profile?.coverPhoto && (
+                    <img
+                      src={profile.coverPhoto}
+                      alt="Cover"
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Cover Photo
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Update your cover image
+                  </p>
+                </div>
+              </div>
+              <button
+                data-ocid="settings.cover_photo_button"
+                type="button"
+                onClick={() => coverPhotoFileRef.current?.click()}
+                className="text-xs font-semibold text-primary bg-primary/10 px-3 py-1.5 rounded-lg hover:bg-primary/20 transition-colors focus-visible:outline-none"
+              >
+                Change
+              </button>
+            </div>
+          )}
+
+          {/* Change Email */}
+          <div className="px-4 py-4 flex flex-col gap-3 border-b border-border">
+            <p className="text-sm font-semibold text-foreground">
+              Change Email
+            </p>
+            <Input
+              data-ocid="settings.email.input"
+              type="email"
+              value={emailVal}
+              onChange={(e) => setEmailVal(e.target.value)}
+              placeholder="Enter new email"
+              className="h-10 text-sm rounded-xl"
+            />
+            <Button
+              data-ocid="settings.email.save_button"
+              type="button"
+              onClick={handleSaveEmail}
+              disabled={emailSaving}
+              className="w-full h-10 rounded-xl text-sm font-semibold bg-primary hover:bg-primary/90"
+            >
+              {emailSaving ? "Saving..." : "Save Email"}
+            </Button>
+          </div>
+
+          {/* Mobile (display only — mobile is the user ID) */}
+          <div className="px-4 py-4 flex flex-col gap-3 border-b border-border">
+            <p className="text-sm font-semibold text-foreground">
+              Mobile Number
+            </p>
+            <Input
+              data-ocid="settings.mobile.input"
+              type="tel"
+              value={mobileVal}
+              onChange={(e) => setMobileVal(e.target.value)}
+              placeholder="Mobile number"
+              className="h-10 text-sm rounded-xl"
+              readOnly
+            />
+            <Button
+              data-ocid="settings.mobile.save_button"
+              type="button"
+              onClick={() =>
+                toast.info(
+                  "Mobile number cannot be changed. It is used as your login ID.",
+                )
+              }
+              variant="outline"
+              className="w-full h-10 rounded-xl text-sm font-semibold"
+            >
+              Contact Support to Change
+            </Button>
+          </div>
+
+          {/* Change Password */}
+          <div className="px-4 py-4 flex flex-col gap-3">
+            <p className="text-sm font-semibold text-foreground">
+              Change Password
+            </p>
+            {/* Current password */}
+            <div className="relative">
+              <Input
+                data-ocid="settings.current_password.input"
+                type={showCurrentPw ? "text" : "password"}
+                value={currentPw}
+                onChange={(e) => setCurrentPw(e.target.value)}
+                placeholder="Current password"
+                className="h-10 text-sm rounded-xl pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPw(!showCurrentPw)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                aria-label="Toggle current password visibility"
+              >
+                {showCurrentPw ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            {/* New password */}
+            <div className="relative">
+              <Input
+                data-ocid="settings.new_password.input"
+                type={showNewPw ? "text" : "password"}
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                placeholder="New password (min 8 characters)"
+                className="h-10 text-sm rounded-xl pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPw(!showNewPw)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                aria-label="Toggle new password visibility"
+              >
+                {showNewPw ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            {/* Confirm password */}
+            <div className="relative">
+              <Input
+                data-ocid="settings.confirm_password.input"
+                type={showConfirmPw ? "text" : "password"}
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                placeholder="Confirm new password"
+                className="h-10 text-sm rounded-xl pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPw(!showConfirmPw)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus-visible:outline-none"
+                aria-label="Toggle confirm password visibility"
+              >
+                {showConfirmPw ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            <Button
+              data-ocid="settings.password.save_button"
+              type="button"
+              onClick={handleSavePassword}
+              disabled={pwSaving}
+              className="w-full h-10 rounded-xl text-sm font-semibold bg-primary hover:bg-primary/90"
+            >
+              {pwSaving ? "Saving..." : "Change Password"}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Notification Preferences ─────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Notification Preferences
+            </p>
+          </div>
+
+          <div className="divide-y divide-border">
+            {/* New Messages */}
+            <div className="flex items-center justify-between px-4 py-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  New Messages
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Get notified when you receive a message
+                </p>
+              </div>
+              <Switch
+                data-ocid="settings.notif_messages.switch"
+                checked={notifPrefs.messages}
+                onCheckedChange={(val) => handleNotifToggle("messages", val)}
+                aria-label="New messages notifications"
+              />
+            </div>
+
+            {/* Case Updates */}
+            <div className="flex items-center justify-between px-4 py-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Case Updates
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Alerts when your cases are updated
+                </p>
+              </div>
+              <Switch
+                data-ocid="settings.notif_cases.switch"
+                checked={notifPrefs.caseUpdates}
+                onCheckedChange={(val) => handleNotifToggle("caseUpdates", val)}
+                aria-label="Case update notifications"
+              />
+            </div>
+
+            {/* Hearing Reminders */}
+            <div className="flex items-center justify-between px-4 py-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  Hearing Reminders
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Reminders before upcoming hearings
+                </p>
+              </div>
+              <Switch
+                data-ocid="settings.notif_hearings.switch"
+                checked={notifPrefs.hearingReminders}
+                onCheckedChange={(val) =>
+                  handleNotifToggle("hearingReminders", val)
+                }
+                aria-label="Hearing reminder notifications"
+              />
+            </div>
+
+            {/* Post Interactions (advocate only) */}
+            {isAdvocate && (
+              <div className="flex items-center justify-between px-4 py-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    Post Interactions
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Likes and comments on your posts
+                  </p>
+                </div>
+                <Switch
+                  data-ocid="settings.notif_posts.switch"
+                  checked={notifPrefs.postInteractions}
+                  onCheckedChange={(val) =>
+                    handleNotifToggle("postInteractions", val)
+                  }
+                  aria-label="Post interaction notifications"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── App Info ─────────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              App Information
+            </p>
+          </div>
+          <div className="px-4 py-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Version</span>
+              <span className="font-medium text-foreground">1.0.0</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Platform</span>
+              <span className="font-medium text-foreground">My Advocate</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Role</span>
+              <Badge variant="outline" className="text-xs capitalize">
+                {user.role}
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-muted-foreground pb-2">
+          © {new Date().getFullYear()} My Advocate · Made by Ankit Sharma
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── HelpTab ──────────────────────────────────────────────────────────────────
+
+const FAQ_ITEMS = [
+  {
+    q: "How do I connect with an advocate?",
+    a: "You can connect with an advocate by entering their referral code during sign-up, or by using the 'Find Advocates' tab to search and send a connection request.",
+  },
+  {
+    q: "How do I add a case?",
+    a: "Advocates can add cases by going to the Cases tab, selecting a client, and tapping 'Add Case'. Fill in the case details including case number, type, court, and hearing date.",
+  },
+  {
+    q: "What is a referral code?",
+    a: "A referral code is a unique code given to each advocate (e.g., ADV-7F3K9). Clients can enter this code during registration or on the Find Advocates page to connect directly with a specific advocate.",
+  },
+  {
+    q: "How do I upload documents?",
+    a: "Open any case, scroll to the Documents section, and tap 'Add Document'. You can upload PDF, DOC, DOCX, JPG, or PNG files up to 25 MB. Add a title, document type, and optional notes before uploading.",
+  },
+  {
+    q: "Can I change my practice area?",
+    a: "Yes. Go to the Settings tab or your Profile tab and tap 'Edit Profile'. You can update your practice area and other professional details there.",
+  },
+  {
+    q: "How do I reset my password?",
+    a: "On the login screen, tap 'Forgot Password'. Enter your registered mobile number, verify the OTP sent to your phone, and set a new password.",
+  },
+];
+
+function HelpTab({ onBack }: { onBack: () => void }) {
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactSending, setContactSending] = useState(false);
+
+  const [reportType, setReportType] = useState("");
+  const [reportDesc, setReportDesc] = useState("");
+  const [reportSending, setReportSending] = useState(false);
+
+  function handleSendContact() {
+    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) {
+      toast.error("Please fill in all fields.");
+      return;
+    }
+    setContactSending(true);
+    setTimeout(() => {
+      setContactSending(false);
+      setContactName("");
+      setContactEmail("");
+      setContactMessage("");
+      toast.success(
+        "Message sent! Our support team will get back to you soon.",
+      );
+    }, 800);
+  }
+
+  function handleSubmitReport() {
+    if (!reportType || !reportDesc.trim()) {
+      toast.error("Please select a problem type and describe the issue.");
+      return;
+    }
+    setReportSending(true);
+    setTimeout(() => {
+      setReportSending(false);
+      setReportType("");
+      setReportDesc("");
+      toast.success("Report submitted. Thank you for helping us improve.");
+    }, 800);
+  }
+
+  return (
+    <div
+      data-ocid="help.section"
+      className="flex flex-col bg-gray-50 min-h-full"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-white sticky top-0 z-10">
+        <button
+          type="button"
+          onClick={onBack}
+          className="p-1 -ml-1 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h1 className="text-base font-bold text-foreground">
+          Help &amp; Support
+        </h1>
+        <div className="ml-auto w-8 h-8 rounded-xl bg-teal-50 flex items-center justify-center">
+          <HelpCircle className="w-4 h-4 text-teal-600" />
+        </div>
+      </div>
+
+      <div className="px-4 py-4 flex flex-col gap-5">
+        {/* ── FAQ ──────────────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Frequently Asked Questions
+            </p>
+          </div>
+          <div data-ocid="help.faq.panel" className="px-4">
+            <Accordion type="single" collapsible className="w-full">
+              {FAQ_ITEMS.map((item, idx) => (
+                <AccordionItem
+                  key={item.q}
+                  value={`faq-${idx}`}
+                  className="border-border"
+                >
+                  <AccordionTrigger className="text-sm font-medium text-foreground hover:text-primary text-left py-3.5">
+                    {item.q}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-sm text-muted-foreground pb-4 leading-relaxed">
+                    {item.a}
+                  </AccordionContent>
+                </AccordionItem>
+              ))}
+            </Accordion>
+          </div>
+        </div>
+
+        {/* ── Contact Support ───────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Contact Support
+            </p>
+          </div>
+          <div className="px-4 py-4 flex flex-col gap-3">
+            <p className="text-xs text-muted-foreground">
+              Have a question? Our support team is here to help.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="help-contact-name"
+                className="text-xs font-semibold text-foreground"
+              >
+                Your Name
+              </Label>
+              <Input
+                id="help-contact-name"
+                data-ocid="help.contact.name.input"
+                type="text"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                placeholder="Full name"
+                className="h-10 text-sm rounded-xl"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="help-contact-email"
+                className="text-xs font-semibold text-foreground"
+              >
+                Email
+              </Label>
+              <Input
+                id="help-contact-email"
+                data-ocid="help.contact.email.input"
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="your@email.com"
+                className="h-10 text-sm rounded-xl"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="help-contact-msg"
+                className="text-xs font-semibold text-foreground"
+              >
+                Message
+              </Label>
+              <Textarea
+                id="help-contact-msg"
+                data-ocid="help.contact.message.textarea"
+                value={contactMessage}
+                onChange={(e) => setContactMessage(e.target.value)}
+                placeholder="Describe your issue or question..."
+                className="text-sm rounded-xl resize-none min-h-[100px]"
+              />
+            </div>
+            <Button
+              data-ocid="help.contact.submit_button"
+              type="button"
+              onClick={handleSendContact}
+              disabled={contactSending}
+              className="w-full h-10 rounded-xl text-sm font-semibold bg-primary hover:bg-primary/90"
+            >
+              {contactSending ? "Sending..." : "Send Message"}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Report a Problem ──────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              Report a Problem
+            </p>
+          </div>
+          <div className="px-4 py-4 flex flex-col gap-3">
+            <p className="text-xs text-muted-foreground">
+              Found a bug or experiencing an issue? Let us know.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="help-report-type"
+                className="text-xs font-semibold text-foreground"
+              >
+                Problem Type
+              </Label>
+              <Select value={reportType} onValueChange={setReportType}>
+                <SelectTrigger
+                  id="help-report-type"
+                  data-ocid="help.report.type.select"
+                  className="h-10 text-sm rounded-xl"
+                >
+                  <SelectValue placeholder="Select type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Bug">Bug / Technical Issue</SelectItem>
+                  <SelectItem value="Wrong Info">Wrong Information</SelectItem>
+                  <SelectItem value="Harassment">Harassment / Abuse</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label
+                htmlFor="help-report-desc"
+                className="text-xs font-semibold text-foreground"
+              >
+                Description
+              </Label>
+              <Textarea
+                id="help-report-desc"
+                data-ocid="help.report.description.textarea"
+                value={reportDesc}
+                onChange={(e) => setReportDesc(e.target.value)}
+                placeholder="Please describe the problem in detail..."
+                className="text-sm rounded-xl resize-none min-h-[100px]"
+              />
+            </div>
+            <Button
+              data-ocid="help.report.submit_button"
+              type="button"
+              onClick={handleSubmitReport}
+              disabled={reportSending}
+              className="w-full h-10 rounded-xl text-sm font-semibold bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+            >
+              {reportSending ? "Submitting..." : "Submit Report"}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── About My Advocate ────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-border bg-gray-50">
+            <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
+              About My Advocate
+            </p>
+          </div>
+          <div className="px-4 py-5 flex flex-col items-center text-center gap-3">
+            <img
+              src="/assets/uploads/file_000000003c74720b8f411065c41e45f4-3.png"
+              alt="My Advocate"
+              className="h-16 w-auto object-contain"
+            />
+            <div>
+              <p className="text-sm font-bold text-foreground">My Advocate</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                India's Professional Legal Network
+              </p>
+            </div>
+            <Separator className="w-full" />
+            <div className="flex flex-col gap-1.5 text-xs text-muted-foreground w-full">
+              <div className="flex justify-between">
+                <span>Version</span>
+                <span className="font-medium text-foreground">1.0.0</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Made by</span>
+                <span className="font-medium text-foreground">
+                  Ankit Sharma
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>Platform</span>
+                <a
+                  href="https://caffeine.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary hover:underline"
+                >
+                  caffeine.ai
+                </a>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground/70 pt-1">
+              © {new Date().getFullYear()} My Advocate · All rights reserved
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── App Root ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -16869,6 +18111,35 @@ export default function App() {
     setScreen("chat");
   }
 
+  function handleDrawerAction(action: string) {
+    switch (action) {
+      case "my-profile":
+        setActiveShellTab("profile");
+        break;
+      case "calendar":
+        setActiveShellTab("drawer-calendar");
+        break;
+      case "documents":
+        setActiveShellTab("drawer-documents");
+        break;
+      case "statistics":
+        setActiveShellTab("drawer-statistics");
+        break;
+      case "notifications":
+        setNotificationUnreadCount(0);
+        setActiveShellTab("notifications");
+        break;
+      case "settings":
+        setActiveShellTab("settings");
+        break;
+      case "help":
+        setActiveShellTab("help");
+        break;
+      default:
+        break;
+    }
+  }
+
   return (
     <div className="app-shell">
       <div className="mobile-card">
@@ -16944,6 +18215,7 @@ export default function App() {
             onLogout={handleLogout}
             activeTab={activeShellTab}
             onTabChange={setActiveShellTab}
+            onDrawerAction={handleDrawerAction}
             messageUnreadCount={
               currentUser
                 ? getTotalUnreadCount(currentUser.mobile, currentUser.role)
@@ -17001,6 +18273,33 @@ export default function App() {
                   setActiveShellTab(tab);
                 }}
               />
+            )}
+            {activeShellTab === "drawer-calendar" && currentUser && (
+              <DrawerCalendarTab
+                user={currentUser}
+                onBack={() => setActiveShellTab("home")}
+              />
+            )}
+            {activeShellTab === "drawer-documents" && currentUser && (
+              <DrawerDocumentsTab
+                user={currentUser}
+                onBack={() => setActiveShellTab("home")}
+              />
+            )}
+            {activeShellTab === "drawer-statistics" && currentUser && (
+              <DrawerStatisticsTab
+                user={currentUser}
+                onBack={() => setActiveShellTab("home")}
+              />
+            )}
+            {activeShellTab === "settings" && currentUser && (
+              <SettingsTab
+                user={currentUser}
+                onBack={() => setActiveShellTab("home")}
+              />
+            )}
+            {activeShellTab === "help" && (
+              <HelpTab onBack={() => setActiveShellTab("home")} />
             )}
           </AppShell>
         )}
