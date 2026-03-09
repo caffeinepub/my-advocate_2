@@ -8,6 +8,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  BadgeCheck,
   BarChart2,
   Bell,
   Calendar,
@@ -23,9 +24,9 @@ import {
   Settings,
   User,
   Users,
+  X,
 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+import { useEffect, useRef, useState } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,243 @@ interface AppShellProps {
   children?: React.ReactNode;
 }
 
+// ─── Search Data ──────────────────────────────────────────────────────────────
+
+const SEARCH_ADVOCATES = [
+  {
+    id: "1",
+    name: "Ankit Sharma",
+    city: "Mumbai",
+    practiceArea: "Criminal Law",
+    verified: true,
+  },
+  {
+    id: "2",
+    name: "Priya Mehta",
+    city: "Delhi",
+    practiceArea: "Family Law",
+    verified: true,
+  },
+  {
+    id: "3",
+    name: "Rahul Gupta",
+    city: "Bangalore",
+    practiceArea: "Corporate Law",
+    verified: false,
+  },
+  {
+    id: "4",
+    name: "Sneha Patel",
+    city: "Ahmedabad",
+    practiceArea: "Civil Law",
+    verified: true,
+  },
+  {
+    id: "5",
+    name: "Vikram Singh",
+    city: "Chandigarh",
+    practiceArea: "Property Law",
+    verified: false,
+  },
+  {
+    id: "6",
+    name: "Kavita Nair",
+    city: "Chennai",
+    practiceArea: "Labour Law",
+    verified: true,
+  },
+  {
+    id: "7",
+    name: "Arjun Reddy",
+    city: "Hyderabad",
+    practiceArea: "Tax Law",
+    verified: false,
+  },
+  {
+    id: "8",
+    name: "Meera Joshi",
+    city: "Pune",
+    practiceArea: "Intellectual Property",
+    verified: true,
+  },
+  {
+    id: "9",
+    name: "Suresh Iyer",
+    city: "Kochi",
+    practiceArea: "Banking Law",
+    verified: false,
+  },
+  {
+    id: "10",
+    name: "Deepa Verma",
+    city: "Lucknow",
+    practiceArea: "Consumer Law",
+    verified: true,
+  },
+];
+
+// ─── Search Overlay ───────────────────────────────────────────────────────────
+
+function SearchOverlay({
+  open,
+  query,
+  onQueryChange,
+  onClose,
+}: {
+  open: boolean;
+  query: string;
+  onQueryChange: (q: string) => void;
+  onClose: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      // Small delay to ensure the element is mounted/visible before focusing
+      const t = setTimeout(() => inputRef.current?.focus(), 80);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const q = query.trim().toLowerCase();
+  const results = q
+    ? SEARCH_ADVOCATES.filter(
+        (a) =>
+          a.name.toLowerCase().includes(q) ||
+          a.city.toLowerCase().includes(q) ||
+          a.practiceArea.toLowerCase().includes(q),
+      )
+    : SEARCH_ADVOCATES;
+
+  function getInitialsLocal(name: string) {
+    return name
+      .split(" ")
+      .map((w) => w[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  }
+
+  const AVATAR_BG = [
+    "bg-blue-600",
+    "bg-emerald-600",
+    "bg-violet-600",
+    "bg-rose-600",
+    "bg-amber-600",
+  ];
+  function avatarBg(name: string) {
+    return AVATAR_BG[name.charCodeAt(0) % AVATAR_BG.length];
+  }
+
+  return (
+    <>
+      {/* Backdrop — keyboard accessible close */}
+      <div
+        className="fixed inset-0 z-50 bg-black/30"
+        aria-hidden="true"
+        onClick={onClose}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") onClose();
+        }}
+        // biome-ignore lint/a11y/useSemanticElements: backdrop overlay, not a true interactive element
+        role="presentation"
+      />
+
+      {/* Panel */}
+      <section
+        data-ocid="search.overlay"
+        className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-[51] bg-white shadow-xl flex flex-col"
+        style={{ maxHeight: "85dvh" }}
+        aria-label="Search advocates"
+      >
+        {/* Search bar */}
+        <div className="flex items-center gap-2 px-3 py-3 border-b border-gray-100">
+          <Search className="w-4 h-4 text-muted-foreground shrink-0" />
+          <input
+            ref={inputRef}
+            data-ocid="search.input"
+            type="search"
+            inputMode="search"
+            placeholder="Search by name, city, or practice area…"
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            className="flex-1 text-sm bg-transparent outline-none text-foreground placeholder:text-muted-foreground"
+            aria-label="Search advocates"
+          />
+          <button
+            data-ocid="search.close_button"
+            type="button"
+            aria-label="Close search"
+            onClick={onClose}
+            className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors shrink-0 text-muted-foreground"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Results */}
+        <div className="overflow-y-auto flex-1">
+          {results.length === 0 ? (
+            <div
+              data-ocid="search.empty_state"
+              className="py-12 text-center text-muted-foreground text-sm"
+            >
+              No advocates found
+            </div>
+          ) : (
+            <ul aria-label="Search results">
+              {results.map((advocate, idx) => (
+                <li
+                  key={advocate.id}
+                  data-ocid={`search.result.item.${idx + 1}`}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0 cursor-pointer"
+                >
+                  {/* Avatar */}
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${avatarBg(advocate.name)} text-white text-sm font-bold`}
+                  >
+                    {getInitialsLocal(advocate.name)}
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-semibold text-foreground truncate">
+                        {advocate.name}
+                      </span>
+                      {advocate.verified && (
+                        <span className="inline-flex items-center gap-0.5 bg-blue-50 text-blue-600 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0">
+                          <BadgeCheck className="w-3 h-3" />
+                          Verified
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {advocate.city} · {advocate.practiceArea}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
 // ─── Top Header ───────────────────────────────────────────────────────────────
 
 function TopHeader({
@@ -64,38 +302,37 @@ function TopHeader({
   return (
     <header
       data-ocid="header.section"
-      className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-40 flex items-center justify-between px-4 bg-white border-b border-border shadow-sm"
-      style={{ height: 56 }}
+      className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-40 flex items-center justify-between px-3 bg-white border-b border-border shadow-sm"
+      style={{ height: 76 }}
     >
-      {/* Hamburger menu */}
+      {/* Hamburger menu — fixed width so logo can center against it */}
       <button
         data-ocid="header.hamburger_button"
         type="button"
         aria-label="Open menu"
         onClick={onHamburgerClick}
-        className="flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
         style={{ width: 44, height: 44 }}
       >
-        <Menu className="w-5 h-5" />
+        <Menu className="w-6 h-6" />
       </button>
 
-      {/* Center logo */}
-      <button
-        type="button"
-        aria-label="My Advocate – home"
-        className="absolute left-1/2 -translate-x-1/2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+      {/* Center logo — absolutely centered between icons */}
+      <div
+        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        style={{ left: 60, right: 100 }}
       >
         <img
-          src="/assets/uploads/file_0000000067dc720b979aa33b95fe860c-2.png"
-          alt="My Advocate"
-          style={{ height: 32, width: "auto" }}
+          src="/assets/uploads/file_000000003c74720b8f411065c41e45f4-2-1.png"
+          alt="My Advocate – India's Professional Legal Network"
+          style={{ height: 56, width: "auto", maxWidth: "100%" }}
           className="object-contain"
           draggable={false}
         />
-      </button>
+      </div>
 
-      {/* Right icons */}
-      <div className="flex items-center gap-1">
+      {/* Right icons — fixed width to balance with hamburger */}
+      <div className="flex items-center gap-0.5 ml-auto shrink-0">
         <button
           data-ocid="header.search_button"
           type="button"
@@ -229,9 +466,9 @@ function BottomNav({
               className="relative flex items-center justify-center transition-all duration-200"
               style={{
                 width: 40,
-                height: 28,
-                borderRadius: 14,
-                backgroundColor: isActive ? "#EFF6FF" : "transparent",
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: isActive ? "#DBEAFE" : "transparent",
               }}
             >
               <Icon
@@ -541,9 +778,12 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   function handleSearchClick() {
-    toast.info("Search coming soon");
+    setSearchOpen(true);
+    setSearchQuery("");
   }
 
   function handleNotificationClick() {
@@ -572,10 +812,18 @@ export function AppShell({
         }}
       />
 
+      {/* Search Overlay */}
+      <SearchOverlay
+        open={searchOpen}
+        query={searchQuery}
+        onQueryChange={setSearchQuery}
+        onClose={() => setSearchOpen(false)}
+      />
+
       {/* Main content area — padded to avoid header/nav overlap */}
       <main
         className="flex-1 overflow-y-auto"
-        style={{ paddingTop: 56, paddingBottom: 64 }}
+        style={{ paddingTop: 76, paddingBottom: 64 }}
       >
         {children ?? <TabPlaceholder tab={activeTab} />}
       </main>

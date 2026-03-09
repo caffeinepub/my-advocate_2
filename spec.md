@@ -2,35 +2,45 @@
 
 ## Current State
 
-The Advocate Verification system has a `VerificationStatus` type (`"not_verified" | "pending" | "verified"`) stored per-user in localStorage via `loadVerificationStatus` / `saveVerificationStatus`. The profile page (`ProfileTab`) shows the verification UI section. The verified state currently shows a green `CheckCircle2` icon with the text "Verified Advocate" inside the verification card only — it does not appear next to the advocate name elsewhere on the platform.
+The Admin Panel (`AdminPanel.tsx`) already has a basic `AdminVerificationPage` that:
+- Shows advocates in Pending/All/Verified/Rejected tabs
+- Has Approve and Reject buttons (reject requires a reason)
+- Has a "View Details" modal showing advocate profile info and submitted form data
+- Saves verification status to `myadvocate_verification` localStorage key
+- Does NOT send in-app notifications on approve/reject
+- Does NOT have a "View Documents" modal (documents are shown inline as text in the Details modal)
+- Does NOT sync the verified badge to the main app (status is saved to localStorage but the main App.tsx reads from the same key so it does sync, but notifications are missing)
+
+The main `App.tsx` has:
+- `saveNotification()` function writing to `myadvocate_notifications` key
+- `StoredNotification` interface: `{ id, userId, type, title, body, avatarInitials, avatarColor, relatedTab, timestamp, read }`
+- `NotificationType` union (case_update, message, hearing, connection, post_like, comment, verification)
 
 ## Requested Changes (Diff)
 
 ### Add
-- A reusable `VerifiedBadge` inline component: a blue `BadgeCheck` (or `CheckCircle2`) icon with a "Verified Advocate" label in blue, shown inline next to an advocate's name when their verification status is `"verified"`.
-- A helper function `getAdvocateVerificationStatus(mobile: string): VerificationStatus` that reads from localStorage — to be used in components that render other advocates' names (feed posts, find advocates, chat header).
-- The `VerifiedBadge` displayed next to the advocate's name in:
-  1. **Advocate profile page** (`ProfileTab`) — next to the `<h1>` displaying `displayName`
-  2. **Legal Feed posts** — next to `{post.authorName}` in both `LegalFeedTab` and `LegalFeedScreen`
-  3. **Find Advocates directory** — next to `{profile.fullName}` in both `FindAdvocatesTab` and `FindAdvocatesPage`
-  4. **Messages chat header** — next to `{partnerName}` in `ChatScreen`
+- `VerificationDocumentsModal`: A separate modal in AdminVerificationPage that opens when admin clicks "View Documents" button, showing the Enrollment Certificate and Advocate ID Card filenames with styled download/preview buttons
+- In-app notification dispatch: when admin Approves an advocate, write a notification to `myadvocate_notifications` for that advocate's userId with title "Verification Approved" and body "Your verification has been approved. Your profile now shows the Verified Advocate badge."
+- In-app notification dispatch: when admin Rejects an advocate, write a notification for that advocate's userId with the rejection reason as part of the body
+- "View Documents" button in each advocate row (visible always if formData exists, not just on pending)
+- Document preview modal: shows enrollment cert name and ID card name as styled file items, with a "Download" (demo) and optionally a small preview icon; files stored as names only so preview shows filename with file type icon
 
 ### Modify
-- `LegalFeedTab` and `LegalFeedScreen`: posts need to store or look up the author's mobile to check their verification status. Since posts currently only store `authorName` (no `authorMobile`), we should add `authorMobile?: string` to the `UserPost` interface and populate it when creating posts. For demo posts (`DemoPost`), no badge is shown (no mobile available). For user posts, use the stored `authorMobile` to look up verification status.
-- `ChatScreen`: look up the partner's verification status using `partnerUserId` (which is their mobile).
-- `FindAdvocatesTab` and `FindAdvocatesPage`: use `advData.userId` to look up verification status.
-- `ProfileTab`: use `user.mobile` (the current user's mobile) to look up their own verification status for badge display.
+- `AdminVerificationPage`: Separate "View Details" and "View Documents" into two distinct buttons per row
+- `approve()` function: after saving status to localStorage, also call a `pushVerificationNotification(mobile, 'approved')` helper
+- `confirmReject()` function: after saving status, also call `pushVerificationNotification(mobile, 'rejected', reason)`
+- Add a shared constant for the notifications localStorage key in AdminPanel.tsx
 
 ### Remove
-- Nothing removed.
+- Document filenames shown inline inside the "View Details" modal — move them exclusively to the Documents modal
 
 ## Implementation Plan
 
-1. Add `authorMobile?: string` to the `UserPost` interface.
-2. Populate `authorMobile: user.mobile` (or `currentUser.mobile`) when creating new posts in `LegalFeedTab.handleSubmitPost` and `LegalFeedScreen.handleSubmitPost`.
-3. Create a small inline `VerifiedBadge` component (blue `BadgeCheck` icon + "Verified Advocate" text, compact, inline-flex).
-4. In `ProfileTab`: after the `<h1>{displayName}</h1>`, conditionally render `<VerifiedBadge />` when `verificationStatus === "verified"` and `isAdvocate`.
-5. In `LegalFeedTab` and `LegalFeedScreen`: for each post, if it is a `UserPost` and has `authorMobile`, call `loadVerificationStatus(authorMobile)` and show `<VerifiedBadge />` next to `{post.authorName}`.
-6. In `FindAdvocatesTab`: next to `{profile.fullName}`, call `loadVerificationStatus(advData.userId)` and show `<VerifiedBadge />` if `"verified"`.
-7. In `FindAdvocatesPage`: same as above.
-8. In `ChatScreen`: if the partner is an advocate (check via `loadAllAdvocateData()`), call `loadVerificationStatus(partnerUserId)` and show `<VerifiedBadge />` next to `{partnerName}` in the chat header.
+1. Add `LS_NOTIFICATIONS_KEY = "myadvocate_notifications"` constant to AdminPanel.tsx
+2. Add `pushVerificationNotification(mobile, action, reason?)` helper function that constructs and writes a `StoredNotification` object to localStorage
+3. Add `VerificationDocumentsModal` component: receives `formData` and `advocateName`, renders a modal with styled file rows (icon + filename + demo download button)
+4. Update the advocate row in `AdminVerificationPage` to show both a "View Documents" button (only if formData has document names) and a "View Details" button
+5. Wire `approve()` to call `pushVerificationNotification` after status save
+6. Wire `confirmReject()` to call `pushVerificationNotification` with the rejection reason
+7. Remove document fields from the "View Details" modal (they now live in the documents modal)
+8. Add deterministic `data-ocid` markers to all new interactive elements

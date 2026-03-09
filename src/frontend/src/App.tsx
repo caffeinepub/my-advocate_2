@@ -93,6 +93,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Star,
   ThumbsUp,
   Trash2,
   Upload,
@@ -119,6 +120,7 @@ import {
   YAxis,
 } from "recharts";
 import { toast } from "sonner";
+import { AdminApp, saveVerificationFormData } from "./AdminPanel";
 
 type Screen =
   | "splash"
@@ -1597,6 +1599,201 @@ function getMatchTags(
   )
     tags.push("Same court");
   return tags;
+}
+
+// ─── Reviews & Ratings ───────────────────────────────────────────────────────
+
+const LS_REVIEWS_KEY = "myadvocate_reviews";
+
+interface AdvocateReview {
+  id: string;
+  advocateId: string; // mobile of advocate being reviewed
+  clientId: string; // mobile of the reviewing client
+  clientName: string;
+  rating: number; // 1-5
+  text: string;
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
+  advocateReply?: string;
+  replyUpdatedAt?: string;
+}
+
+function loadReviews(advocateId: string): AdvocateReview[] {
+  try {
+    const all: AdvocateReview[] = JSON.parse(
+      localStorage.getItem(LS_REVIEWS_KEY) || "[]",
+    );
+    return all
+      .filter((r) => r.advocateId === advocateId)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+  } catch {
+    return [];
+  }
+}
+
+function saveReview(review: AdvocateReview): void {
+  try {
+    const all: AdvocateReview[] = JSON.parse(
+      localStorage.getItem(LS_REVIEWS_KEY) || "[]",
+    );
+    const idx = all.findIndex((r) => r.id === review.id);
+    if (idx >= 0) all[idx] = review;
+    else all.push(review);
+    localStorage.setItem(LS_REVIEWS_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+function deleteReview(reviewId: string): void {
+  try {
+    const all: AdvocateReview[] = JSON.parse(
+      localStorage.getItem(LS_REVIEWS_KEY) || "[]",
+    );
+    localStorage.setItem(
+      LS_REVIEWS_KEY,
+      JSON.stringify(all.filter((r) => r.id !== reviewId)),
+    );
+  } catch {}
+}
+
+const LS_REVIEWS_SEEDED_KEY = "myadvocate_reviews_seeded_v1";
+
+function seedDemoReviews() {
+  if (localStorage.getItem(LS_REVIEWS_SEEDED_KEY)) return;
+  const now = Date.now();
+  const demoReviews: AdvocateReview[] = [
+    // Arjun Sharma (9800000001) — Criminal Law
+    {
+      id: "rev_seed_001",
+      advocateId: "9800000001",
+      clientId: "9900000001",
+      clientName: "Rohit Mehta",
+      rating: 5,
+      text: "Arjun Sir handled my bail matter with exceptional skill. He was always reachable, explained every step clearly, and got us a favorable order within two hearings. Highly recommend him for any criminal matter.",
+      createdAt: new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
+      advocateReply:
+        "Thank you Rohit ji for your kind words. It was a pleasure working on your case. Do reach out if you need any further assistance.",
+      replyUpdatedAt: new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_002",
+      advocateId: "9800000001",
+      clientId: "9900000002",
+      clientName: "Kavitha Subramaniam",
+      rating: 4,
+      text: "Very professional and knowledgeable. The case took longer than expected but Mr. Sharma kept me informed throughout. Good communication and genuine dedication to the case.",
+      createdAt: new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 45 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_003",
+      advocateId: "9800000001",
+      clientId: "9900000003",
+      clientName: "Suresh Iyer",
+      rating: 5,
+      text: "Outstanding representation at the Delhi High Court. Mr. Sharma's courtroom presence is commanding and his legal arguments were watertight. Got complete acquittal in sessions trial.",
+      createdAt: new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 90 * 24 * 60 * 60 * 1000).toISOString(),
+      advocateReply:
+        "Thank you Suresh ji! Your cooperation during the entire process made a big difference. Best wishes.",
+      replyUpdatedAt: new Date(now - 89 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_004",
+      advocateId: "9800000001",
+      clientId: "9900000004",
+      clientName: "Anjali Rajput",
+      rating: 4,
+      text: "Handled my FIR quashing petition competently. Reasonable fees and transparent billing. Would have given 5 stars but response time on messages could be faster.",
+      createdAt: new Date(now - 120 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 120 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    // Priya Nair (9800000002) — Family Law
+    {
+      id: "rev_seed_005",
+      advocateId: "9800000002",
+      clientId: "9900000005",
+      clientName: "Deepika Pillai",
+      rating: 5,
+      text: "Ms. Priya handled my divorce and custody case with great empathy and legal expertise. She made a very difficult time much easier to navigate. The interim maintenance order was secured very quickly.",
+      createdAt: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString(),
+      advocateReply:
+        "Thank you Deepika. Family matters require both legal knowledge and sensitivity. I am glad I could help. Stay strong!",
+      replyUpdatedAt: new Date(now - 19 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_006",
+      advocateId: "9800000002",
+      clientId: "9900000006",
+      clientName: "Vishal Malhotra",
+      rating: 5,
+      text: "Priya Madam guided me through a complex succession dispute involving multiple properties across two states. Her knowledge of the Hindu Succession Act is thorough and her strategy was excellent.",
+      createdAt: new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 60 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_007",
+      advocateId: "9800000002",
+      clientId: "9900000007",
+      clientName: "Meenakshi Gopalan",
+      rating: 3,
+      text: "Knowledgeable lawyer but the case dragged on for longer than estimated. Communication was good but I expected faster resolution of the maintenance petition. Overall satisfactory experience.",
+      createdAt: new Date(now - 150 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 150 * 24 * 60 * 60 * 1000).toISOString(),
+      advocateReply:
+        "Thank you for your honest feedback Meenakshi ji. Delays in family courts are unfortunately beyond our control. I appreciate your patience throughout.",
+      replyUpdatedAt: new Date(now - 148 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    // Ravi Krishnan (9800000003) — Corporate Law
+    {
+      id: "rev_seed_008",
+      advocateId: "9800000003",
+      clientId: "9900000008",
+      clientName: "Aditya Srinivasan",
+      rating: 5,
+      text: "Ravi Sir represented our startup in a contract dispute worth ₹2.3 crore. His command over commercial law and NCLT procedures is exceptional. We won the case and recovered dues with interest.",
+      createdAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      advocateReply:
+        "Thank you Aditya. Glad we could secure a positive outcome for your business. Reach out anytime for future legal needs.",
+      replyUpdatedAt: new Date(now - 9 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_009",
+      advocateId: "9800000003",
+      clientId: "9900000009",
+      clientName: "Nandita Chakraborty",
+      rating: 4,
+      text: "Excellent corporate lawyer with deep knowledge of IBC and insolvency matters. Helped our company navigate a complex CIRP process. Billing is transparent and professional.",
+      createdAt: new Date(now - 75 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 75 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "rev_seed_010",
+      advocateId: "9800000003",
+      clientId: "9900000010",
+      clientName: "Prakash Venkataraman",
+      rating: 5,
+      text: "Top-class legal counsel for our MSME. Mr. Ravi drafted our shareholder agreements and advised on regulatory compliance. His advice saved us from a major penalty during a SEBI inquiry.",
+      createdAt: new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(now - 100 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+  ];
+  try {
+    const existing: AdvocateReview[] = JSON.parse(
+      localStorage.getItem(LS_REVIEWS_KEY) || "[]",
+    );
+    const merged = [...existing];
+    for (const r of demoReviews) {
+      if (!merged.some((e) => e.id === r.id)) merged.push(r);
+    }
+    localStorage.setItem(LS_REVIEWS_KEY, JSON.stringify(merged));
+  } catch {}
+  localStorage.setItem(LS_REVIEWS_SEEDED_KEY, "1");
 }
 
 function formatMsgTime(isoStr: string): string {
@@ -10756,6 +10953,42 @@ function ClientProfileCasesSection({
   );
 }
 
+// ─── StarRating Component ──────────────────────────────────────────────────────
+
+function StarRating({
+  rating,
+  max = 5,
+  interactive = false,
+  size = "md",
+  onChange,
+}: {
+  rating: number;
+  max?: number;
+  interactive?: boolean;
+  size?: "sm" | "md" | "lg";
+  onChange?: (r: number) => void;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const sizeClass =
+    size === "sm" ? "w-3.5 h-3.5" : size === "lg" ? "w-6 h-6" : "w-5 h-5";
+  const display = hovered ?? rating;
+  return (
+    <div className="flex items-center gap-0.5">
+      {Array.from({ length: max }, (_, i) => i + 1).map((star) => (
+        <Star
+          key={star}
+          className={`${sizeClass} transition-colors ${
+            star <= display ? "fill-amber-400 text-amber-400" : "text-gray-300"
+          } ${interactive ? "cursor-pointer hover:scale-110 transition-transform" : ""}`}
+          onClick={interactive ? () => onChange?.(star) : undefined}
+          onMouseEnter={interactive ? () => setHovered(star) : undefined}
+          onMouseLeave={interactive ? () => setHovered(null) : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Advocate Public Profile Page ─────────────────────────────────────────────
 
 function AdvocatePublicProfilePage({
@@ -10786,6 +11019,76 @@ function AdvocatePublicProfilePage({
   const advLocation = [advProfile?.city, advProfile?.state]
     .filter(Boolean)
     .join(", ");
+
+  // ── Reviews state ──
+  const [reviews, setReviews] = useState<AdvocateReview[]>(() =>
+    loadReviews(advocateUserId),
+  );
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewText, setReviewText] = useState("");
+
+  const clientData =
+    user && user.role !== "advocate"
+      ? (loadAllClientData().find((c) => c.userId === user.mobile) ?? null)
+      : null;
+  const isConnectedClient = !!(
+    clientData &&
+    advocateData &&
+    clientData.linkedAdvocateId &&
+    clientData.linkedAdvocateId.toUpperCase() ===
+      advocateData.referralCode.toUpperCase()
+  );
+
+  const myReview = reviews.find((r) => r.clientId === user?.mobile) ?? null;
+  const { avg, count } = useMemo(() => {
+    if (!reviews.length) return { avg: 0, count: 0 };
+    const sum = reviews.reduce((s, r) => s + r.rating, 0);
+    const average = sum / reviews.length;
+    return { avg: Math.round(average * 10) / 10, count: reviews.length };
+  }, [reviews]);
+
+  function handleSubmitReview() {
+    if (!reviewText.trim()) {
+      toast.error("Please write a review message.");
+      return;
+    }
+    if (!user) return;
+    const clientProfile = loadProfile(user.mobile);
+    const clientName = clientProfile?.fullName || user.mobile;
+    const now = new Date().toISOString();
+    if (myReview) {
+      saveReview({
+        ...myReview,
+        rating: reviewRating,
+        text: reviewText,
+        updatedAt: now,
+      });
+      toast.success("Review updated");
+    } else {
+      saveReview({
+        id: `rev_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        advocateId: advocateUserId,
+        clientId: user.mobile,
+        clientName,
+        rating: reviewRating,
+        text: reviewText,
+        createdAt: now,
+        updatedAt: now,
+      });
+      toast.success("Review submitted");
+    }
+    setReviews(loadReviews(advocateUserId));
+    setShowReviewForm(false);
+    setReviewText("");
+    setReviewRating(5);
+  }
+
+  function handleDeleteReview(reviewId: string) {
+    deleteReview(reviewId);
+    setReviews(loadReviews(advocateUserId));
+    toast.success("Review deleted");
+  }
 
   return (
     <div
@@ -10959,6 +11262,195 @@ function AdvocatePublicProfilePage({
               <Mail className="w-4 h-4" />
               Message Advocate
             </button>
+          </div>
+
+          {/* ── Reviews Section ─────────────────────────────────────────── */}
+          <div
+            className="w-full mt-6 pb-4"
+            data-ocid="advocate_public_profile.reviews.section"
+          >
+            {/* Header with average */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {count > 0 ? (
+                  <>
+                    <StarRating rating={avg} size="sm" />
+                    <span className="text-sm font-bold text-foreground">
+                      {avg}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      ({count} review{count !== 1 ? "s" : ""})
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-sm font-semibold text-foreground">
+                    No reviews yet
+                  </span>
+                )}
+              </div>
+              {/* "Rate Your Advocate" button */}
+              {isConnectedClient && !myReview && !showReviewForm && (
+                <button
+                  type="button"
+                  data-ocid="advocate_public_profile.reviews.rate.button"
+                  onClick={() => setShowReviewForm(true)}
+                  className="flex items-center gap-1.5 bg-primary text-primary-foreground text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-primary/90 transition-colors"
+                >
+                  <Star className="w-3.5 h-3.5" />
+                  Rate Your Advocate
+                </button>
+              )}
+            </div>
+
+            {/* Inline Review Form */}
+            {showReviewForm && isConnectedClient && (
+              <div
+                className="bg-white rounded-2xl border border-border shadow-sm p-4 mb-4"
+                data-ocid="advocate_public_profile.reviews.form"
+              >
+                <p className="text-sm font-semibold text-foreground mb-3">
+                  {myReview ? "Edit Your Review" : "Write a Review"}
+                </p>
+                <div className="flex items-center gap-2 mb-3">
+                  <StarRating
+                    rating={reviewRating}
+                    interactive
+                    onChange={setReviewRating}
+                    size="lg"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {reviewRating}/5
+                  </span>
+                </div>
+                <textarea
+                  data-ocid="advocate_public_profile.reviews.text.textarea"
+                  value={reviewText}
+                  onChange={(e) => setReviewText(e.target.value)}
+                  placeholder="Share your experience working with this advocate..."
+                  rows={3}
+                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                />
+                <div className="flex gap-2 mt-3">
+                  <button
+                    type="button"
+                    data-ocid="advocate_public_profile.reviews.submit.button"
+                    onClick={handleSubmitReview}
+                    className="flex-1 bg-primary text-primary-foreground text-sm font-semibold py-2 rounded-xl hover:bg-primary/90 transition-colors"
+                  >
+                    {myReview ? "Update Review" : "Submit Review"}
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="advocate_public_profile.reviews.cancel.button"
+                    onClick={() => {
+                      setShowReviewForm(false);
+                      setReviewText("");
+                      setReviewRating(5);
+                    }}
+                    className="px-4 py-2 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Review List */}
+            {reviews.length === 0 ? (
+              <div
+                data-ocid="advocate_public_profile.reviews.empty_state"
+                className="bg-white rounded-2xl border border-border shadow-sm px-4 py-8 flex flex-col items-center text-center"
+              >
+                <Star className="w-8 h-8 text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground">
+                  No reviews yet. Be the first to rate this advocate.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {reviews.map((review, idx) => {
+                  const isMyReview = review.clientId === user?.mobile;
+                  return (
+                    <div
+                      key={review.id}
+                      data-ocid={`advocate_public_profile.reviews.item.${idx + 1}`}
+                      className="bg-white rounded-2xl border border-border shadow-sm p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <span className="text-xs font-bold text-primary">
+                              {review.clientName
+                                .split(" ")
+                                .map((w) => w[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">
+                              {review.clientName}
+                            </p>
+                            <StarRating rating={review.rating} size="sm" />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(review.createdAt).toLocaleDateString(
+                              "en-IN",
+                              {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              },
+                            )}
+                          </span>
+                          {isMyReview && (
+                            <>
+                              <button
+                                type="button"
+                                data-ocid={`advocate_public_profile.reviews.edit.button.${idx + 1}`}
+                                onClick={() => {
+                                  setReviewText(review.text);
+                                  setReviewRating(review.rating);
+                                  setShowReviewForm(true);
+                                }}
+                                className="p-1 rounded hover:bg-muted/60"
+                              >
+                                <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                              </button>
+                              <button
+                                type="button"
+                                data-ocid={`advocate_public_profile.reviews.delete.button.${idx + 1}`}
+                                onClick={() => handleDeleteReview(review.id)}
+                                className="p-1 rounded hover:bg-muted/60"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-foreground leading-relaxed">
+                        {review.text}
+                      </p>
+                      {/* Advocate reply */}
+                      {review.advocateReply && (
+                        <div className="mt-3 bg-blue-50 rounded-xl px-3 py-2.5 border-l-2 border-primary">
+                          <p className="text-xs font-semibold text-primary mb-1">
+                            Advocate&apos;s Response
+                          </p>
+                          <p className="text-xs text-foreground leading-relaxed">
+                            {review.advocateReply}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </main>
@@ -15336,6 +15828,14 @@ function ProfileTab({ user }: { user: StoredUser }) {
       toast.error("Please fill in all fields and upload both documents.");
       return;
     }
+    // Save form data for admin panel access
+    saveVerificationFormData(user.mobile, {
+      barCouncilEnrollment: verifEnrollmentNumber.trim(),
+      stateBarCouncil: verifStateBarCouncil.trim(),
+      enrollmentCertName: verifEnrollmentCert.name,
+      idCardName: verifIdCard.name,
+      submittedAt: new Date().toISOString(),
+    });
     saveVerificationStatus(user.mobile, "pending");
     setVerificationStatus("pending");
     setShowVerificationForm(false);
@@ -15344,6 +15844,37 @@ function ProfileTab({ user }: { user: StoredUser }) {
     setVerifEnrollmentCert(null);
     setVerifIdCard(null);
     toast.success("Verification submitted successfully");
+  }
+
+  // Reviews (advocate only)
+  const [advReviews, setAdvReviews] = useState<AdvocateReview[]>(() =>
+    isAdvocate ? loadReviews(user.mobile) : [],
+  );
+  const advReviewStats = useMemo(() => {
+    if (!advReviews.length) return { avg: 0, count: 0 };
+    const sum = advReviews.reduce((s, r) => s + r.rating, 0);
+    const average = sum / advReviews.length;
+    return { avg: Math.round(average * 10) / 10, count: advReviews.length };
+  }, [advReviews]);
+  const [replyingToReviewId, setReplyingToReviewId] = useState<string | null>(
+    null,
+  );
+  const [replyText, setReplyText] = useState("");
+
+  function handleSaveReply(review: AdvocateReview) {
+    if (!replyText.trim()) {
+      toast.error("Please write a reply.");
+      return;
+    }
+    saveReview({
+      ...review,
+      advocateReply: replyText,
+      replyUpdatedAt: new Date().toISOString(),
+    });
+    setAdvReviews(loadReviews(user.mobile));
+    setReplyingToReviewId(null);
+    setReplyText("");
+    toast.success("Reply posted");
   }
 
   // Stats
@@ -16322,6 +16853,194 @@ function ProfileTab({ user }: { user: StoredUser }) {
                 <p className="text-xs text-muted-foreground mt-1">
                   Enter an advocate&apos;s referral code to connect.
                 </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Client Reviews (advocate only) */}
+        {isAdvocate && (
+          <div
+            data-ocid="profile_tab.reviews.section"
+            className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden"
+          >
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
+                  <Star className="w-4 h-4 text-amber-500" />
+                </div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Client Reviews
+                </p>
+              </div>
+              {advReviewStats.count > 0 && (
+                <div className="flex items-center gap-1">
+                  <StarRating rating={advReviewStats.avg} size="sm" />
+                  <span className="text-xs font-bold text-foreground">
+                    {advReviewStats.avg}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    ({advReviewStats.count})
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {advReviews.length === 0 ? (
+              <div
+                data-ocid="profile_tab.reviews.empty_state"
+                className="px-4 py-8 flex flex-col items-center text-center"
+              >
+                <Star className="w-8 h-8 text-muted-foreground mb-2" />
+                <p className="text-sm font-medium text-foreground">
+                  No reviews yet
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-[200px] leading-relaxed">
+                  Client reviews will appear here once clients rate your
+                  services.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {advReviews.map((review, idx) => (
+                  <div
+                    key={review.id}
+                    data-ocid={`profile_tab.reviews.item.${idx + 1}`}
+                    className="px-4 py-4"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <span className="text-xs font-bold text-primary">
+                            {review.clientName
+                              .split(" ")
+                              .map((w) => w[0])
+                              .join("")
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">
+                            {review.clientName}
+                          </p>
+                          <StarRating rating={review.rating} size="sm" />
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {new Date(review.createdAt).toLocaleDateString(
+                          "en-IN",
+                          {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          },
+                        )}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-foreground leading-relaxed">
+                      {review.text}
+                    </p>
+
+                    {/* Advocate reply */}
+                    {review.advocateReply ? (
+                      <div className="mt-3 bg-blue-50 rounded-xl px-3 py-2.5 border-l-2 border-primary">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-semibold text-primary">
+                            Your Response
+                          </p>
+                          <button
+                            type="button"
+                            data-ocid={`profile_tab.reviews.edit_reply.button.${idx + 1}`}
+                            onClick={() =>
+                              setReplyingToReviewId(
+                                review.id === replyingToReviewId
+                                  ? null
+                                  : review.id,
+                              )
+                            }
+                            className="text-xs text-primary underline"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                        {replyingToReviewId === review.id ? (
+                          <div className="flex flex-col gap-2 mt-1">
+                            <textarea
+                              data-ocid={`profile_tab.reviews.reply.textarea.${idx + 1}`}
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              rows={2}
+                              className="w-full text-xs border border-border rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                data-ocid={`profile_tab.reviews.reply.save.button.${idx + 1}`}
+                                onClick={() => handleSaveReply(review)}
+                                className="flex-1 bg-primary text-primary-foreground text-xs font-semibold py-1.5 rounded-lg hover:bg-primary/90 transition-colors"
+                              >
+                                Save Reply
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReplyingToReviewId(null)}
+                                className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-foreground leading-relaxed">
+                            {review.advocateReply}
+                          </p>
+                        )}
+                      </div>
+                    ) : replyingToReviewId === review.id ? (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <textarea
+                          data-ocid={`profile_tab.reviews.reply.textarea.${idx + 1}`}
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder="Write a public reply..."
+                          rows={2}
+                          className="w-full text-xs border border-border rounded-lg px-2 py-1.5 resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            data-ocid={`profile_tab.reviews.reply.save.button.${idx + 1}`}
+                            onClick={() => handleSaveReply(review)}
+                            className="flex-1 bg-primary text-primary-foreground text-xs font-semibold py-1.5 rounded-lg hover:bg-primary/90 transition-colors"
+                          >
+                            Post Reply
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyingToReviewId(null)}
+                            className="px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        data-ocid={`profile_tab.reviews.reply.button.${idx + 1}`}
+                        onClick={() => {
+                          setReplyingToReviewId(review.id);
+                          setReplyText("");
+                        }}
+                        className="mt-2 flex items-center gap-1.5 text-xs text-primary font-medium hover:underline"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> Reply to
+                        review
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -18416,9 +19135,9 @@ function HelpTab({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ─── App Root ─────────────────────────────────────────────────────────────────
+// ─── Main App (normal user flows) ────────────────────────────────────────────
 
-export default function App() {
+function MainApp() {
   const [screen, setScreen] = useState<Screen>("splash");
   const [registeredRole, setRegisteredRole] = useState<
     "advocate" | "client" | null
@@ -18439,9 +19158,10 @@ export default function App() {
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [networkPendingCount, setNetworkPendingCount] = useState(0);
 
-  // Seed sample advocates once on first mount
+  // Seed sample advocates and demo reviews once on first mount
   useEffect(() => {
     seedSampleAdvocates();
+    seedDemoReviews();
   }, []);
 
   // Refresh notification count whenever the current user changes
@@ -18844,4 +19564,21 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+// ─── App Root with admin hash routing ─────────────────────────────────────────
+export default function App() {
+  const [isAdminRoute, setIsAdminRoute] = useState(() =>
+    window.location.hash.startsWith("#/admin"),
+  );
+  useEffect(() => {
+    function onHashChange() {
+      setIsAdminRoute(window.location.hash.startsWith("#/admin"));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  if (isAdminRoute) return <AdminApp />;
+  return <MainApp />;
 }
