@@ -50,6 +50,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
   BadgeCheck,
@@ -74,6 +75,7 @@ import {
   FileCheck,
   FileText,
   Filter,
+  Flag,
   HelpCircle,
   ImageIcon,
   Info,
@@ -603,6 +605,20 @@ interface UserPost {
 }
 
 const LS_FEED_POSTS_KEY = "myadvocate_feed_posts";
+const LS_CONTENT_STATUS_KEY = "myadvocate_content_status";
+
+function loadContentStatus(): Record<
+  string,
+  { hidden?: boolean; commentsDisabled?: boolean }
+> {
+  try {
+    const v = localStorage.getItem(LS_CONTENT_STATUS_KEY);
+    if (!v) return {};
+    return JSON.parse(v);
+  } catch {
+    return {};
+  }
+}
 
 function loadUserPosts(): UserPost[] {
   try {
@@ -1794,6 +1810,230 @@ function seedDemoReviews() {
     localStorage.setItem(LS_REVIEWS_KEY, JSON.stringify(merged));
   } catch {}
   localStorage.setItem(LS_REVIEWS_SEEDED_KEY, "1");
+}
+
+// ─── User Reports ─────────────────────────────────────────────────────────────
+const LS_REPORTS_KEY = "myadvocate_reports";
+
+interface UserReport {
+  id: string;
+  reporterId: string;
+  reporterName: string;
+  reportedId: string;
+  reportedName: string;
+  reportType: "User" | "Post" | "Message";
+  reportedContentPreview: string;
+  reason: string;
+  note: string;
+  status: "Pending" | "Ignored" | "Warned" | "Suspended" | "Banned";
+  createdAt: string;
+}
+
+function loadReports(): UserReport[] {
+  try {
+    return JSON.parse(localStorage.getItem(LS_REPORTS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveReport(report: UserReport): void {
+  const all = loadReports();
+  const existing = all.findIndex((r) => r.id === report.id);
+  if (existing >= 0) all[existing] = report;
+  else all.unshift(report);
+  localStorage.setItem(LS_REPORTS_KEY, JSON.stringify(all));
+}
+
+function generateReportId(): string {
+  return `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+const REPORT_REASONS = [
+  "Harassment or bullying",
+  "Spam or misleading content",
+  "Fake profile or impersonation",
+  "Inappropriate content",
+  "Misinformation",
+  "Unprofessional conduct",
+  "Privacy violation",
+  "Other",
+];
+
+function ReportFormModal({
+  open,
+  onClose,
+  reportType,
+  reportedId,
+  reportedName,
+  contentPreview,
+  reporterId,
+  reporterName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  reportType: "User" | "Post" | "Message";
+  reportedId: string;
+  reportedName: string;
+  contentPreview?: string;
+  reporterId: string;
+  reporterName: string;
+}) {
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  function handleSubmit() {
+    if (!reason) return;
+    const report: UserReport = {
+      id: generateReportId(),
+      reporterId,
+      reporterName,
+      reportedId,
+      reportedName,
+      reportType,
+      reportedContentPreview: contentPreview || reportedName,
+      reason,
+      note: note.trim(),
+      status: "Pending",
+      createdAt: new Date().toISOString(),
+    };
+    saveReport(report);
+    setSubmitted(true);
+  }
+
+  function handleClose() {
+    setReason("");
+    setNote("");
+    setSubmitted(false);
+    onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50">
+      <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-xl">
+        {submitted ? (
+          <div className="text-center py-6">
+            <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <CheckCircle2 className="w-7 h-7 text-green-600" />
+            </div>
+            <h3 className="font-semibold text-gray-900 text-lg mb-1">
+              Report Submitted
+            </h3>
+            <p className="text-gray-500 text-sm mb-5">
+              Our team will review your report and take appropriate action.
+            </p>
+            <button
+              type="button"
+              onClick={handleClose}
+              data-ocid="report.close_button"
+              className="w-full py-2.5 rounded-xl bg-blue-600 text-white font-medium text-sm"
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Flag className="w-5 h-5 text-red-500" />
+                <h3 className="font-semibold text-gray-900">
+                  Report{" "}
+                  {reportType === "User"
+                    ? "User"
+                    : reportType === "Post"
+                      ? "Post"
+                      : "Message"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleClose}
+                data-ocid="report.close_button"
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {reportedName && (
+              <p className="text-sm text-gray-500 mb-4">
+                Reporting:{" "}
+                <span className="font-medium text-gray-700">
+                  {reportedName}
+                </span>
+              </p>
+            )}
+            <div className="mb-4">
+              <label
+                htmlFor="report-reason"
+                className="block text-sm font-medium text-gray-700 mb-1.5"
+              >
+                Reason <span className="text-red-500">*</span>
+              </label>
+              <select
+                id="report-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                data-ocid="report.select"
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="">Select a reason</option>
+                {REPORT_REASONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              {!reason && (
+                <p className="text-xs text-red-500 mt-1">
+                  Please select a reason
+                </p>
+              )}
+            </div>
+            <div className="mb-5">
+              <label
+                htmlFor="report-note"
+                className="block text-sm font-medium text-gray-700 mb-1.5"
+              >
+                Additional details{" "}
+                <span className="text-gray-400">(optional)</span>
+              </label>
+              <textarea
+                id="report-note"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                data-ocid="report.textarea"
+                rows={3}
+                placeholder="Describe the issue in more detail..."
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleClose}
+                data-ocid="report.cancel_button"
+                className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!reason}
+                data-ocid="report.submit_button"
+                className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-medium text-sm disabled:opacity-50"
+              >
+                Submit Report
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function formatMsgTime(isoStr: string): string {
@@ -3136,6 +3376,18 @@ function AdvocateRegistrationForm({
   onRegister,
   onLogin,
 }: AdvocateFormProps) {
+  const [registrationsClosed] = useState(() => {
+    try {
+      const v = localStorage.getItem("myadvocate_platform_settings");
+      if (!v) return false;
+      return (
+        (JSON.parse(v) as { registrationsDisabled?: boolean })
+          .registrationsDisabled === true
+      );
+    } catch {
+      return false;
+    }
+  });
   const [otpPhase, setOtpPhase] = useState<OtpPhase>("mobile");
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
@@ -3237,6 +3489,15 @@ function AdvocateRegistrationForm({
 
   return (
     <div className="flex flex-col flex-1 px-6 pt-6 pb-6">
+      {registrationsClosed && (
+        <div
+          data-ocid="advocate_reg.registrations_closed.error_state"
+          className="mb-4 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700"
+        >
+          <X className="w-4 h-4 shrink-0 text-red-500" />
+          Registrations are currently closed.
+        </div>
+      )}
       <div className="mb-5">
         <BackButton
           ocid="advocate_reg.back.button"
@@ -3580,7 +3841,7 @@ function AdvocateRegistrationForm({
           <Button
             data-ocid="advocate_reg.submit_button"
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || registrationsClosed}
             className="h-12 text-base font-semibold w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl mt-2"
           >
             {isSubmitting ? "Registering…" : "Register as Advocate"}
@@ -3620,6 +3881,18 @@ function ClientRegistrationForm({
   onRegister,
   onLogin,
 }: ClientFormProps) {
+  const [registrationsClosed] = useState(() => {
+    try {
+      const v = localStorage.getItem("myadvocate_platform_settings");
+      if (!v) return false;
+      return (
+        (JSON.parse(v) as { registrationsDisabled?: boolean })
+          .registrationsDisabled === true
+      );
+    } catch {
+      return false;
+    }
+  });
   const [otpPhase, setOtpPhase] = useState<OtpPhase>("mobile");
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
@@ -3711,6 +3984,15 @@ function ClientRegistrationForm({
 
   return (
     <div className="flex flex-col flex-1 px-6 pt-6 pb-6">
+      {registrationsClosed && (
+        <div
+          data-ocid="client_reg.registrations_closed.error_state"
+          className="mb-4 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700"
+        >
+          <X className="w-4 h-4 shrink-0 text-red-500" />
+          Registrations are currently closed.
+        </div>
+      )}
       <div className="mb-5">
         <BackButton
           ocid="client_reg.back.button"
@@ -3978,7 +4260,7 @@ function ClientRegistrationForm({
           <Button
             data-ocid="client_reg.submit_button"
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || registrationsClosed}
             className="h-12 text-base font-semibold w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl mt-2"
           >
             {isSubmitting ? "Registering…" : "Register as Client"}
@@ -9892,6 +10174,7 @@ function MessagesTabChat({
   const [isSending, setIsSending] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [casePickerOpen, setCasePickerOpen] = useState(false);
+  const [chatReportModalOpen, setChatReportModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -10175,7 +10458,7 @@ function MessagesTabChat({
           </p>
         </div>
 
-        {/* Call + Video buttons */}
+        {/* Call + Video + Report buttons */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             data-ocid="messages_tab.chat.call.button"
@@ -10194,6 +10477,16 @@ function MessagesTabChat({
             aria-label="Video call"
           >
             <Video className="w-4.5 h-4.5" style={{ width: 18, height: 18 }} />
+          </button>
+          <button
+            data-ocid="messages_tab.chat.report.button"
+            type="button"
+            onClick={() => setChatReportModalOpen(true)}
+            className="flex items-center justify-center w-9 h-9 rounded-full text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Report"
+            title="Report this conversation"
+          >
+            <Flag className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -10511,6 +10804,21 @@ function MessagesTabChat({
           </button>
         </div>
       </div>
+
+      {/* ── Report Modal ── */}
+      <ReportFormModal
+        open={chatReportModalOpen}
+        onClose={() => setChatReportModalOpen(false)}
+        reportType="Message"
+        reportedId={partnerUserId}
+        reportedName={partnerName}
+        reporterId={user.mobile}
+        reporterName={
+          userProfile?.fullName ||
+          loadProfile(user.mobile)?.fullName ||
+          user.mobile
+        }
+      />
     </div>
   );
 }
@@ -13085,6 +13393,11 @@ function FindAdvocatesPage({
   const [filterCourt, setFilterCourt] = useState("");
   const [filterExpRange, setFilterExpRange] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const allAdvocates = useMemo(() => {
     const allAdv = loadAllAdvocateData();
@@ -13464,81 +13777,122 @@ function FindAdvocatesPage({
                 .slice(0, 2)
                 .toUpperCase();
               return (
-                <button
+                <div
                   key={advData.userId}
                   data-ocid={`find-advocates.item.${idx + 1}`}
-                  type="button"
-                  onClick={() => onViewAdvocate(advData.userId)}
-                  className="w-full text-left flex items-center gap-3.5 p-4 bg-white rounded-2xl border border-border shadow-sm hover:border-primary/40 hover:shadow-md transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="relative w-full bg-white rounded-2xl border border-border shadow-sm hover:border-primary/40 hover:shadow-md transition-all duration-200"
                 >
-                  {/* Avatar */}
-                  <div className="shrink-0 w-14 h-14 rounded-full overflow-hidden border-2 border-border bg-primary/5">
-                    {profile.profilePhoto ? (
-                      <img
-                        src={profile.profilePhoto}
-                        alt={profile.fullName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <span className="text-base font-bold text-primary">
-                          {initials2}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onViewAdvocate(advData.userId)}
+                    className="w-full text-left flex items-center gap-3.5 p-4 pr-12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-2xl"
+                  >
+                    {/* Avatar */}
+                    <div className="shrink-0 w-14 h-14 rounded-full overflow-hidden border-2 border-border bg-primary/5">
+                      {profile.profilePhoto ? (
+                        <img
+                          src={profile.profilePhoto}
+                          alt={profile.fullName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-base font-bold text-primary">
+                            {initials2}
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="text-sm font-bold text-foreground">
-                          {profile.fullName}
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-sm font-bold text-foreground">
+                            {profile.fullName}
+                          </p>
+                          {loadVerificationStatus(advData.userId) ===
+                            "verified" && <VerifiedBadge />}
+                        </div>
+                        {connected && (
+                          <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Connected
+                          </span>
+                        )}
+                      </div>
+                      {profile.practiceArea && (
+                        <span className="inline-block mt-0.5 text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                          {profile.practiceArea}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {profile.city && (
+                          <span className="text-xs text-muted-foreground">
+                            {profile.city}
+                          </span>
+                        )}
+                        {profile.city && exp && (
+                          <span className="text-muted-foreground text-xs">
+                            ·
+                          </span>
+                        )}
+                        {exp && (
+                          <span className="text-xs text-muted-foreground">
+                            {exp} exp.
+                          </span>
+                        )}
+                      </div>
+                      {profile.courtName && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                          {profile.courtName}
                         </p>
-                        {loadVerificationStatus(advData.userId) ===
-                          "verified" && <VerifiedBadge />}
-                      </div>
-                      {connected && (
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Connected
-                        </span>
                       )}
                     </div>
-                    {profile.practiceArea && (
-                      <span className="inline-block mt-0.5 text-[11px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                        {profile.practiceArea}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {profile.city && (
-                        <span className="text-xs text-muted-foreground">
-                          {profile.city}
-                        </span>
-                      )}
-                      {profile.city && exp && (
-                        <span className="text-muted-foreground text-xs">·</span>
-                      )}
-                      {exp && (
-                        <span className="text-xs text-muted-foreground">
-                          {exp} exp.
-                        </span>
-                      )}
-                    </div>
-                    {profile.courtName && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                        {profile.courtName}
-                      </p>
-                    )}
-                  </div>
-
-                  <ChevronRight className="shrink-0 w-4 h-4 text-muted-foreground" />
-                </button>
+                    <ChevronRight className="shrink-0 w-4 h-4 text-muted-foreground" />
+                  </button>
+                  {/* Report button */}
+                  <button
+                    data-ocid={`find-advocates.report.button.${idx + 1}`}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setReportTarget({
+                        id: advData.userId,
+                        name: profile.fullName,
+                      });
+                      setReportModalOpen(true);
+                    }}
+                    className="absolute top-2 right-2 p-1.5 rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors"
+                    aria-label="Report advocate"
+                    title="Report this advocate"
+                  >
+                    <Flag className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               );
             })
           )}
         </div>
       </main>
+
+      {/* ── Report Modal ── */}
+      {reportTarget && (
+        <ReportFormModal
+          open={reportModalOpen}
+          onClose={() => {
+            setReportModalOpen(false);
+            setReportTarget(null);
+          }}
+          reportType="User"
+          reportedId={reportTarget.id}
+          reportedName={reportTarget.name}
+          reporterId={user?.mobile || ""}
+          reporterName={
+            user ? loadProfile(user.mobile)?.fullName || user.mobile : ""
+          }
+        />
+      )}
     </div>
   );
 }
@@ -13564,6 +13918,7 @@ function AdvocateDiscoveryProfilePage({
   const [referralCode, setReferralCode] = useState("");
   const [referralError, setReferralError] = useState("");
   const [showReferral, setShowReferral] = useState(false);
+  const [adpReportModalOpen, setAdpReportModalOpen] = useState(false);
   const [connected, setConnected] = useState(() => {
     if (!user || user.role !== "client") return false;
     const cd = loadAllClientData().find((c) => c.userId === user.mobile);
@@ -13968,6 +14323,19 @@ function AdvocateDiscoveryProfilePage({
           </div>
         )}
 
+        {/* Report button */}
+        <div className="px-5 mt-1 mb-2">
+          <button
+            data-ocid="advocate-discovery-profile.report.button"
+            type="button"
+            onClick={() => setAdpReportModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <Flag className="w-3.5 h-3.5" />
+            Report this advocate
+          </button>
+        </div>
+
         {/* Divider */}
         <div className="mx-5 h-px bg-border mb-5" />
 
@@ -14068,6 +14436,21 @@ function AdvocateDiscoveryProfilePage({
           })()}
         </div>
       </main>
+
+      {/* ── Report Modal ── */}
+      {profile && (
+        <ReportFormModal
+          open={adpReportModalOpen}
+          onClose={() => setAdpReportModalOpen(false)}
+          reportType="User"
+          reportedId={advocateUserId}
+          reportedName={profile.fullName}
+          reporterId={user?.mobile || ""}
+          reporterName={
+            user ? loadProfile(user.mobile)?.fullName || user.mobile : ""
+          }
+        />
+      )}
     </div>
   );
 }
@@ -14563,6 +14946,14 @@ function LegalFeedTab({
   const [sharePostText, setSharePostText] = useState<string>("");
   const [sharePostAuthor, setSharePostAuthor] = useState<string>("");
 
+  // Report modal state
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{
+    id: string;
+    name: string;
+    preview: string;
+  } | null>(null);
+
   type ShareContact = {
     id: string;
     name: string;
@@ -14684,6 +15075,16 @@ function LegalFeedTab({
 
   const isAdvocate = currentUser.role === "advocate";
 
+  const [platformSettings] = useState(() => {
+    try {
+      const v = localStorage.getItem("myadvocate_platform_settings");
+      if (!v) return { postingDisabled: false };
+      return JSON.parse(v) as { postingDisabled?: boolean };
+    } catch {
+      return { postingDisabled: false };
+    }
+  });
+
   function toggleLike(postId: string) {
     setLikedPosts((prev) => {
       const next = new Set(prev);
@@ -14770,8 +15171,14 @@ function LegalFeedTab({
     toast.success("Post shared!");
   }
 
-  // Combined feed: user posts first (newest), then demo posts
-  const allPosts = [...userPosts, ...DEMO_POSTS];
+  // Filter hidden posts based on admin content status
+  const contentStatus = loadContentStatus();
+  const visibleUserPosts = userPosts.filter(
+    (p) => !contentStatus[p.id]?.hidden,
+  );
+
+  // Combined feed: visible user posts first (newest), then demo posts
+  const allPosts = [...visibleUserPosts, ...DEMO_POSTS];
 
   return (
     <div
@@ -14834,8 +15241,19 @@ function LegalFeedTab({
           </div>
         )}
 
+        {/* ── Posting disabled banner ── */}
+        {platformSettings.postingDisabled && (
+          <div
+            className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-amber-800 text-sm"
+            data-ocid="feed.posting_disabled.banner"
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Posting is currently disabled by the platform admin.</span>
+          </div>
+        )}
+
         {/* ── Create Post card (Advocates only) ── */}
-        {isAdvocate && (
+        {isAdvocate && !platformSettings.postingDisabled && (
           <div
             data-ocid="legal-feed.create_post.card"
             className="bg-white rounded-xl border border-border shadow-sm p-4"
@@ -14947,6 +15365,8 @@ function LegalFeedTab({
           const postComments = commentsMap[postId] ?? [];
           const commentCount = post.comments + postComments.length;
           const isCommentOpen = openCommentPostId === postId;
+          const isCommentsDisabled =
+            loadContentStatus()[postId]?.commentsDisabled ?? false;
 
           return (
             <div
@@ -15096,6 +15516,29 @@ function LegalFeedTab({
                   <Share2 className="w-4 h-4" />
                   Share
                 </button>
+                {/* Don't show report button on your own posts */}
+                {post.authorName !==
+                  (currentProfile?.fullName || currentUser.mobile) && (
+                  <button
+                    data-ocid={`feed.report.button.${idx + 1}`}
+                    type="button"
+                    onClick={() => {
+                      setReportTarget({
+                        id: isUserPost
+                          ? (post as UserPost).authorMobile || post.authorName
+                          : post.authorName,
+                        name: post.authorName,
+                        preview: post.text.slice(0, 80),
+                      });
+                      setReportModalOpen(true);
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-red-50 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Report"
+                  >
+                    <Flag className="w-4 h-4" />
+                    Report
+                  </button>
+                )}
               </div>
 
               {/* ── Comment panel ── */}
@@ -15142,57 +15585,63 @@ function LegalFeedTab({
                   )}
 
                   {/* Comment input row */}
-                  <div className="flex items-start gap-2">
-                    {/* Current user avatar */}
-                    <div className="w-7 h-7 rounded-full overflow-hidden border border-border shrink-0 mt-0.5">
-                      {currentProfile?.profilePhoto ? (
-                        <img
-                          src={currentProfile.profilePhoto}
-                          alt={displayName}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div
-                          className={`w-full h-full ${getAvatarColorFromName(displayName)} flex items-center justify-center`}
-                        >
-                          <span className="text-[9px] font-bold text-white leading-none">
-                            {initials}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 flex items-center gap-2">
-                      <input
-                        data-ocid="legal-feed.comment.input"
-                        type="text"
-                        value={commentInputs[postId] ?? ""}
-                        onChange={(e) =>
-                          setCommentInputs((prev) => ({
-                            ...prev,
-                            [postId]: e.target.value,
-                          }))
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleCommentSubmit(postId);
+                  {isCommentsDisabled ? (
+                    <p className="text-xs text-muted-foreground text-center py-2 italic">
+                      Comments have been disabled for this post.
+                    </p>
+                  ) : (
+                    <div className="flex items-start gap-2">
+                      {/* Current user avatar */}
+                      <div className="w-7 h-7 rounded-full overflow-hidden border border-border shrink-0 mt-0.5">
+                        {currentProfile?.profilePhoto ? (
+                          <img
+                            src={currentProfile.profilePhoto}
+                            alt={displayName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div
+                            className={`w-full h-full ${getAvatarColorFromName(displayName)} flex items-center justify-center`}
+                          >
+                            <span className="text-[9px] font-bold text-white leading-none">
+                              {initials}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          data-ocid="legal-feed.comment.input"
+                          type="text"
+                          value={commentInputs[postId] ?? ""}
+                          onChange={(e) =>
+                            setCommentInputs((prev) => ({
+                              ...prev,
+                              [postId]: e.target.value,
+                            }))
                           }
-                        }}
-                        placeholder="Write a comment…"
-                        className="flex-1 text-xs bg-white border border-border rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent placeholder:text-muted-foreground/60 transition-colors"
-                      />
-                      <button
-                        data-ocid="legal-feed.comment.submit_button"
-                        type="button"
-                        onClick={() => handleCommentSubmit(postId)}
-                        disabled={!(commentInputs[postId] ?? "").trim()}
-                        className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-label="Post comment"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </button>
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleCommentSubmit(postId);
+                            }
+                          }}
+                          placeholder="Write a comment…"
+                          className="flex-1 text-xs bg-white border border-border rounded-full px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent placeholder:text-muted-foreground/60 transition-colors"
+                        />
+                        <button
+                          data-ocid="legal-feed.comment.submit_button"
+                          type="button"
+                          onClick={() => handleCommentSubmit(postId)}
+                          disabled={!(commentInputs[postId] ?? "").trim()}
+                          className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label="Post comment"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -15299,6 +15748,23 @@ function LegalFeedTab({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* ── Report Modal ── */}
+      {reportTarget && (
+        <ReportFormModal
+          open={reportModalOpen}
+          onClose={() => {
+            setReportModalOpen(false);
+            setReportTarget(null);
+          }}
+          reportType="Post"
+          reportedId={reportTarget.id}
+          reportedName={reportTarget.name}
+          contentPreview={reportTarget.preview}
+          reporterId={currentUser.mobile}
+          reporterName={currentProfile?.fullName || currentUser.mobile}
+        />
+      )}
     </div>
   );
 }
@@ -15318,6 +15784,12 @@ function LegalFeedScreen({
   const [postImage, setPostImage] = useState<string | null>(null);
   const [isPosting, setIsPosting] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{
+    id: string;
+    name: string;
+    preview: string;
+  } | null>(null);
 
   const displayName =
     currentProfile?.fullName ||
@@ -15328,6 +15800,16 @@ function LegalFeedScreen({
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+  const [platformSettings] = useState(() => {
+    try {
+      const v = localStorage.getItem("myadvocate_platform_settings");
+      if (!v) return { postingDisabled: false };
+      return JSON.parse(v) as { postingDisabled?: boolean };
+    } catch {
+      return { postingDisabled: false };
+    }
+  });
 
   function toggleLike(postId: string) {
     setLikedPosts((prev) => {
@@ -15396,8 +15878,14 @@ function LegalFeedScreen({
     toast.success("Post shared!");
   }
 
-  // Combined feed: user posts first (newest), then demo posts
-  const allPosts = [...userPosts, ...DEMO_POSTS];
+  // Filter hidden posts based on admin content status
+  const feedContentStatus = loadContentStatus();
+  const visibleUserPostsScreen = userPosts.filter(
+    (p) => !feedContentStatus[p.id]?.hidden,
+  );
+
+  // Combined feed: visible user posts first (newest), then demo posts
+  const allPosts = [...visibleUserPostsScreen, ...DEMO_POSTS];
 
   return (
     <div
@@ -15461,104 +15949,117 @@ function LegalFeedScreen({
         </div>
 
         <div className="px-4 flex flex-col gap-3">
+          {/* ── Posting disabled banner ── */}
+          {platformSettings.postingDisabled && (
+            <div
+              className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-amber-800 text-sm"
+              data-ocid="feed.posting_disabled.banner"
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Posting is currently disabled by the platform admin.</span>
+            </div>
+          )}
+
           {/* ── Create Post card ── */}
-          <div
-            data-ocid="legal-feed.create_post.card"
-            className="bg-white rounded-xl border border-border shadow-sm p-4"
-          >
-            <div className="flex items-start gap-3">
-              {/* User avatar */}
-              <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border shrink-0 mt-0.5">
-                {currentProfile?.profilePhoto ? (
-                  <img
-                    src={currentProfile.profilePhoto}
-                    alt={displayName}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-xs font-bold text-primary leading-none">
-                      {initials}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Text input */}
-              <div className="flex-1 min-w-0">
-                <Textarea
-                  data-ocid="legal-feed.create_post.textarea"
-                  value={postText}
-                  onChange={(e) => setPostText(e.target.value)}
-                  placeholder="Share legal knowledge, case insights, or legal updates..."
-                  rows={3}
-                  className="w-full resize-none text-sm bg-muted/30 border-border rounded-lg focus:bg-white transition-colors placeholder:text-muted-foreground/70 min-h-[80px]"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                      e.preventDefault();
-                      handleSubmitPost();
-                    }
-                  }}
-                />
-
-                {/* Image preview */}
-                {postImage && (
-                  <div
-                    data-ocid="legal-feed.create_post.image_preview"
-                    className="mt-2 relative inline-block"
-                  >
+          {!platformSettings.postingDisabled && (
+            <div
+              data-ocid="legal-feed.create_post.card"
+              className="bg-white rounded-xl border border-border shadow-sm p-4"
+            >
+              <div className="flex items-start gap-3">
+                {/* User avatar */}
+                <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-border shrink-0 mt-0.5">
+                  {currentProfile?.profilePhoto ? (
                     <img
-                      src={postImage}
-                      alt="Selected attachment preview"
-                      className="w-16 h-16 rounded-lg object-cover border border-border"
+                      src={currentProfile.profilePhoto}
+                      alt={displayName}
+                      className="w-full h-full object-cover"
                     />
-                    <button
-                      data-ocid="legal-feed.create_post.remove_image.button"
-                      type="button"
-                      onClick={() => setPostImage(null)}
-                      aria-label="Remove image"
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground text-background flex items-center justify-center shadow-sm hover:bg-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  ) : (
+                    <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                      <span className="text-xs font-bold text-primary leading-none">
+                        {initials}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Text input */}
+                <div className="flex-1 min-w-0">
+                  <Textarea
+                    data-ocid="legal-feed.create_post.textarea"
+                    value={postText}
+                    onChange={(e) => setPostText(e.target.value)}
+                    placeholder="Share legal knowledge, case insights, or legal updates..."
+                    rows={3}
+                    className="w-full resize-none text-sm bg-muted/30 border-border rounded-lg focus:bg-white transition-colors placeholder:text-muted-foreground/70 min-h-[80px]"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handleSubmitPost();
+                      }
+                    }}
+                  />
+
+                  {/* Image preview */}
+                  {postImage && (
+                    <div
+                      data-ocid="legal-feed.create_post.image_preview"
+                      className="mt-2 relative inline-block"
                     >
-                      <X className="w-3 h-3" />
+                      <img
+                        src={postImage}
+                        alt="Selected attachment preview"
+                        className="w-16 h-16 rounded-lg object-cover border border-border"
+                      />
+                      <button
+                        data-ocid="legal-feed.create_post.remove_image.button"
+                        type="button"
+                        onClick={() => setPostImage(null)}
+                        aria-label="Remove image"
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-foreground text-background flex items-center justify-center shadow-sm hover:bg-foreground/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Bottom action row */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <button
+                      data-ocid="legal-feed.create_post.add_image.button"
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary border border-border rounded-lg px-3 py-1.5 hover:border-primary/40 hover:bg-primary/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      Add Image
                     </button>
+
+                    <Button
+                      data-ocid="legal-feed.create_post.submit_button"
+                      type="button"
+                      size="sm"
+                      disabled={!postText.trim() || isPosting}
+                      onClick={handleSubmitPost}
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      {isPosting ? "Posting..." : "Post"}
+                    </Button>
                   </div>
-                )}
-
-                {/* Bottom action row */}
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <button
-                    data-ocid="legal-feed.create_post.add_image.button"
-                    type="button"
-                    onClick={() => imageInputRef.current?.click()}
-                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary border border-border rounded-lg px-3 py-1.5 hover:border-primary/40 hover:bg-primary/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    Add Image
-                  </button>
-
-                  <Button
-                    data-ocid="legal-feed.create_post.submit_button"
-                    type="button"
-                    size="sm"
-                    disabled={!postText.trim() || isPosting}
-                    onClick={handleSubmitPost}
-                    className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                  >
-                    {isPosting ? "Posting..." : "Post"}
-                  </Button>
                 </div>
               </div>
-            </div>
 
-            {/* Hidden file input */}
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/jpeg,image/png,image/gif,image/webp"
-              className="hidden"
-              onChange={handleImageSelect}
-            />
-          </div>
+              {/* Hidden file input */}
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                className="hidden"
+                onChange={handleImageSelect}
+              />
+            </div>
+          )}
 
           {/* ── Post cards ── */}
           {allPosts.map((post, idx) => {
@@ -15714,6 +16215,27 @@ function LegalFeedScreen({
                     <Share2 className="w-4 h-4" />
                     Share
                   </button>
+                  {post.authorName !== displayName && (
+                    <button
+                      data-ocid={`legal-feed-screen.report.button.${idx + 1}`}
+                      type="button"
+                      onClick={() => {
+                        setReportTarget({
+                          id: isUserPost
+                            ? (post as UserPost).authorMobile || post.authorName
+                            : post.authorName,
+                          name: post.authorName,
+                          preview: post.text.slice(0, 80),
+                        });
+                        setReportModalOpen(true);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-red-50 hover:text-red-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label="Report"
+                    >
+                      <Flag className="w-4 h-4" />
+                      Report
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -15735,6 +16257,23 @@ function LegalFeedScreen({
           </p>
         </div>
       </main>
+
+      {/* ── Report Modal ── */}
+      {reportTarget && (
+        <ReportFormModal
+          open={reportModalOpen}
+          onClose={() => {
+            setReportModalOpen(false);
+            setReportTarget(null);
+          }}
+          reportType="Post"
+          reportedId={reportTarget.id}
+          reportedName={reportTarget.name}
+          contentPreview={reportTarget.preview}
+          reporterId={currentUser.mobile}
+          reporterName={displayName}
+        />
+      )}
     </div>
   );
 }

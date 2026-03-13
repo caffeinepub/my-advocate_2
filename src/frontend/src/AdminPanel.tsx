@@ -22,20 +22,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
+  Ban,
   BarChart2,
   BriefcaseBusiness,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Eye,
+  EyeOff,
   FileText,
   Filter,
+  Flag,
+  Globe,
   HardDrive,
+  Heart,
   LayoutDashboard,
   Lock,
   LogOut,
+  Megaphone,
   MessageCircle,
+  MessageCircleOff,
+  MoreVertical,
   Newspaper,
+  RefreshCw,
   Scale,
   Search,
   Settings,
@@ -44,16 +53,20 @@ import {
   Trash2,
   TrendingUp,
   UserCheck,
+  UserX,
   Users,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -75,6 +88,12 @@ const LS_FEED_POSTS_KEY = "myadvocate_feed_posts";
 const LS_MESSAGES_KEY = "myadvocate_messages";
 const LS_REVIEWS_KEY = "myadvocate_reviews";
 const LS_ADMIN_SETTINGS_KEY = "myadvocate_admin_settings";
+const LS_ACCOUNT_STATUS_KEY = "myadvocate_account_status";
+const LS_LAST_LOGIN_KEY = "myadvocate_last_login";
+const LS_REVIEW_FLAGS_KEY = "myadvocate_review_flags";
+const LS_REPORTS_KEY = "myadvocate_reports";
+const LS_CONTENT_STATUS_KEY = "myadvocate_content_status";
+const LS_PLATFORM_SETTINGS_KEY = "myadvocate_platform_settings";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type AdminPage =
@@ -83,6 +102,7 @@ type AdminPage =
   | "users"
   | "reviews"
   | "reports"
+  | "analytics"
   | "content"
   | "settings";
 interface AdvocateData {
@@ -137,6 +157,7 @@ interface UserPost {
   likes: number;
   comments: number;
   shares: number;
+  imageDataUrl?: string;
 }
 
 interface AdvocateReview {
@@ -158,6 +179,31 @@ interface VerificationFormData {
   enrollmentCertName?: string;
   idCardName?: string;
   submittedAt?: string;
+}
+
+interface UserReport {
+  id: string;
+  reporterId: string;
+  reporterName: string;
+  reportedId: string;
+  reportedName: string;
+  reportType: "User" | "Post" | "Message";
+  reportedContentPreview?: string;
+  reason: string;
+  note?: string;
+  status: "Pending" | "Ignored" | "Warned" | "Suspended" | "Banned";
+  createdAt: string;
+}
+
+interface PlatformSettings {
+  platformName: string;
+  platformDescription: string;
+  customLogoBase64: string;
+  announcementEnabled: boolean;
+  announcementText: string;
+  announcementColor: "info" | "warning" | "success";
+  registrationsDisabled: boolean;
+  postingDisabled: boolean;
 }
 
 // ─── Data helpers ─────────────────────────────────────────────────────────────
@@ -190,6 +236,8 @@ function getAdminStats() {
   const messages = safeParseArray<unknown>(LS_MESSAGES_KEY);
   const verification =
     safeParseObject<Record<string, string>>(LS_VERIFICATION_KEY);
+  const reports = safeParseArray<UserReport>(LS_REPORTS_KEY);
+  const reviews = safeParseArray<AdvocateReview>(LS_REVIEWS_KEY);
 
   let verified = 0;
   let pending = 0;
@@ -203,10 +251,142 @@ function getAdminStats() {
     verifiedAdvocates: verified,
     pendingVerifications: pending,
     totalClients: clients.length,
+    totalUsers: advocates.length + clients.length,
     totalCases: cases.length,
     totalPosts: posts.length + 8, // +8 for demo posts
     totalMessages: messages.length,
+    totalReports: reports.length,
+    pendingReports: reports.filter((r) => r.status === "Pending").length,
+    totalReviews: reviews.length,
   };
+}
+
+// ─── Analytics data generators ─────────────────────────────────────────────
+type TimeRange = "7d" | "30d" | "12m";
+
+function generateUserGrowthData(range: TimeRange) {
+  const now = new Date();
+  const points: { label: string; users: number }[] = [];
+
+  if (range === "7d") {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let base = 42;
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      base += Math.floor(Math.random() * 6) + 1;
+      points.push({ label: days[d.getDay()], users: base });
+    }
+  } else if (range === "30d") {
+    let base = 30;
+    for (let i = 29; i >= 0; i -= 3) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      base += Math.floor(Math.random() * 8) + 2;
+      const label = `${d.getDate()}/${d.getMonth() + 1}`;
+      points.push({ label, users: base });
+    }
+  } else {
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    let base = 10;
+    const startMonth = (now.getMonth() + 1) % 12;
+    for (let i = 0; i < 12; i++) {
+      const monthIdx = (startMonth + i) % 12;
+      base += Math.floor(Math.random() * 15) + 5;
+      points.push({ label: months[monthIdx], users: base });
+    }
+  }
+  return points;
+}
+
+function generatePostActivityData(range: TimeRange) {
+  const now = new Date();
+  const points: { label: string; posts: number }[] = [];
+
+  if (range === "7d") {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      points.push({
+        label: days[d.getDay()],
+        posts: Math.floor(Math.random() * 12) + 1,
+      });
+    }
+  } else if (range === "30d") {
+    for (let i = 29; i >= 0; i -= 3) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const label = `${d.getDate()}/${d.getMonth() + 1}`;
+      points.push({ label, posts: Math.floor(Math.random() * 20) + 3 });
+    }
+  } else {
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const startMonth = (now.getMonth() + 1) % 12;
+    for (let i = 0; i < 12; i++) {
+      const monthIdx = (startMonth + i) % 12;
+      points.push({
+        label: months[monthIdx],
+        posts: Math.floor(Math.random() * 60) + 10,
+      });
+    }
+  }
+  return points;
+}
+
+function getReviewRatingData(): {
+  name: string;
+  value: number;
+  fill: string;
+}[] {
+  const reviews = safeParseArray<AdvocateReview>(LS_REVIEWS_KEY);
+  const counts = [0, 0, 0, 0, 0];
+  for (const r of reviews) {
+    const idx = Math.min(Math.max(Math.round(r.rating), 1), 5) - 1;
+    counts[idx]++;
+  }
+  // Add demo data if no reviews yet
+  if (reviews.length === 0) {
+    counts[0] = 2;
+    counts[1] = 3;
+    counts[2] = 8;
+    counts[3] = 15;
+    counts[4] = 22;
+  }
+  const colors = ["#EF4444", "#F97316", "#EAB308", "#22C55E", "#2563EB"];
+  return [1, 2, 3, 4, 5]
+    .map((star, i) => ({
+      name: `${star} Star${star > 1 ? "s" : ""}`,
+      value: counts[i],
+      fill: colors[i],
+    }))
+    .filter((d) => d.value > 0);
 }
 
 function getAllProfiles(): StoredProfile[] {
@@ -268,6 +448,77 @@ function getLocalStorageUsage(): string {
   if (total < 1024) return `${total} B`;
   if (total < 1024 * 1024) return `${(total / 1024).toFixed(1)} KB`;
   return `${(total / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function getContentStatus(): Record<
+  string,
+  { hidden?: boolean; commentsDisabled?: boolean }
+> {
+  return safeParseObject<
+    Record<string, { hidden?: boolean; commentsDisabled?: boolean }>
+  >(LS_CONTENT_STATUS_KEY);
+}
+
+function saveContentStatus(
+  postId: string,
+  updates: { hidden?: boolean; commentsDisabled?: boolean },
+) {
+  const status = getContentStatus();
+  status[postId] = { ...status[postId], ...updates };
+  localStorage.setItem(LS_CONTENT_STATUS_KEY, JSON.stringify(status));
+}
+
+function pushContentNotification(
+  authorMobile: string | undefined,
+  type: "hidden" | "deleted",
+) {
+  if (!authorMobile) return;
+  const notifications =
+    safeParseArray<Record<string, unknown>>(LS_NOTIFICATIONS_KEY);
+  const notification = {
+    id: Date.now().toString(),
+    userId: authorMobile,
+    type: "content_moderation",
+    title: type === "hidden" ? "Post Hidden by Admin" : "Post Removed by Admin",
+    body:
+      type === "hidden"
+        ? "One of your posts has been hidden from the feed by the platform admin. Please review our community guidelines."
+        : "One of your posts has been permanently removed by the platform admin for violating community guidelines.",
+    avatarInitials: "MA",
+    avatarColor: "bg-red-600",
+    relatedTab: "home",
+    timestamp: new Date().toISOString(),
+    read: false,
+  };
+  notifications.unshift(notification);
+  localStorage.setItem(LS_NOTIFICATIONS_KEY, JSON.stringify(notifications));
+}
+
+// ─── Platform Settings helpers ────────────────────────────────────────────────
+function getDefaultPlatformSettings(): PlatformSettings {
+  return {
+    platformName: "",
+    platformDescription: "",
+    customLogoBase64: "",
+    announcementEnabled: false,
+    announcementText: "",
+    announcementColor: "info",
+    registrationsDisabled: false,
+    postingDisabled: false,
+  };
+}
+
+export function getPlatformSettings(): PlatformSettings {
+  try {
+    const v = localStorage.getItem(LS_PLATFORM_SETTINGS_KEY);
+    if (!v) return getDefaultPlatformSettings();
+    return {
+      ...getDefaultPlatformSettings(),
+      ...(JSON.parse(v) as Partial<PlatformSettings>),
+    };
+  } catch {
+    return getDefaultPlatformSettings();
+  }
 }
 
 // ─── Admin Login Page ─────────────────────────────────────────────────────────
@@ -425,9 +676,15 @@ const NAV_ITEMS: {
   },
   {
     id: "reports",
-    label: "Reports",
-    icon: <BarChart2 className="w-4 h-4" />,
+    label: "User Reports",
+    icon: <Flag className="w-4 h-4" />,
     ocid: "admin.sidebar.reports_link",
+  },
+  {
+    id: "analytics",
+    label: "Analytics",
+    icon: <BarChart2 className="w-4 h-4" />,
+    ocid: "admin.sidebar.analytics_link",
   },
   {
     id: "content",
@@ -550,58 +807,79 @@ function StatCard({
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 function AdminDashboardPage() {
   const stats = useMemo(() => getAdminStats(), []);
+  const [timeRange, setTimeRange] = useState<TimeRange>("30d");
 
-  const cards = [
+  const userGrowthData = useMemo(
+    () => generateUserGrowthData(timeRange),
+    [timeRange],
+  );
+  const postActivityData = useMemo(
+    () => generatePostActivityData(timeRange),
+    [timeRange],
+  );
+  const ratingData = useMemo(() => getReviewRatingData(), []);
+
+  const summaryCards = [
+    {
+      label: "Total Users",
+      value: stats.totalUsers,
+      icon: <Users className="w-5 h-5 text-blue-600" />,
+      color: "bg-blue-50",
+      ocid: "admin.dashboard.stats_card.1",
+    },
     {
       label: "Total Advocates",
       value: stats.totalAdvocates,
-      icon: <UserCheck className="w-5 h-5 text-blue-600" />,
-      color: "bg-blue-50",
-      ocid: "admin.dashboard.stats_card.1",
+      icon: <UserCheck className="w-5 h-5 text-violet-600" />,
+      color: "bg-violet-50",
+      ocid: "admin.dashboard.stats_card.2",
+    },
+    {
+      label: "Total Clients",
+      value: stats.totalClients,
+      icon: <Users className="w-5 h-5 text-cyan-600" />,
+      color: "bg-cyan-50",
+      ocid: "admin.dashboard.stats_card.3",
     },
     {
       label: "Verified Advocates",
       value: stats.verifiedAdvocates,
       icon: <ShieldCheck className="w-5 h-5 text-emerald-600" />,
       color: "bg-emerald-50",
-      ocid: "admin.dashboard.stats_card.2",
-    },
-    {
-      label: "Pending Verifications",
-      value: stats.pendingVerifications,
-      icon: <AlertTriangle className="w-5 h-5 text-amber-600" />,
-      color: "bg-amber-50",
-      ocid: "admin.dashboard.stats_card.3",
-    },
-    {
-      label: "Total Clients",
-      value: stats.totalClients,
-      icon: <Users className="w-5 h-5 text-violet-600" />,
-      color: "bg-violet-50",
       ocid: "admin.dashboard.stats_card.4",
-    },
-    {
-      label: "Total Cases",
-      value: stats.totalCases,
-      icon: <BriefcaseBusiness className="w-5 h-5 text-orange-600" />,
-      color: "bg-orange-50",
-      ocid: "admin.dashboard.stats_card.5",
     },
     {
       label: "Total Posts",
       value: stats.totalPosts,
       icon: <Newspaper className="w-5 h-5 text-pink-600" />,
       color: "bg-pink-50",
-      ocid: "admin.dashboard.stats_card.6",
+      ocid: "admin.dashboard.stats_card.5",
     },
     {
-      label: "Total Messages",
-      value: stats.totalMessages,
-      icon: <MessageCircle className="w-5 h-5 text-cyan-600" />,
-      color: "bg-cyan-50",
-      ocid: "admin.dashboard.stats_card.7",
+      label: "Total Reviews",
+      value: stats.totalReviews,
+      icon: <Star className="w-5 h-5 text-amber-500" />,
+      color: "bg-amber-50",
+      ocid: "admin.dashboard.stats_card.6",
     },
   ];
+
+  const timeRangeOptions: { label: string; value: TimeRange }[] = [
+    { label: "Last 7 days", value: "7d" },
+    { label: "Last 30 days", value: "30d" },
+    { label: "Last 12 months", value: "12m" },
+  ];
+
+  const totalRatings = ratingData.reduce((s, d) => s + d.value, 0);
+  const avgRating =
+    totalRatings > 0
+      ? (
+          ratingData.reduce(
+            (s, d) => s + d.value * Number(d.name.charAt(0)),
+            0,
+          ) / totalRatings
+        ).toFixed(1)
+      : "0.0";
 
   return (
     <div>
@@ -610,29 +888,193 @@ function AdminDashboardPage() {
           Platform Overview
         </h2>
         <p className="text-sm text-slate-500 mt-0.5">
-          Real-time statistics from localStorage
+          Analytics and statistics from platform data
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {cards.map((card) => (
+      {/* 6 Summary Cards — 3×2 grid */}
+      <div
+        className="grid grid-cols-3 gap-3 mb-8"
+        data-ocid="admin.dashboard.stats_card.1"
+      >
+        {summaryCards.map((card) => (
           <StatCard key={card.ocid} {...card} />
         ))}
       </div>
 
-      {/* Quick info */}
-      <div className="mt-8 bg-blue-50 border border-blue-200 rounded-xl p-5">
-        <div className="flex items-center gap-2 mb-2">
-          <TrendingUp className="w-4 h-4 text-blue-600" />
-          <span className="text-sm font-semibold text-blue-800">
-            Platform Health
+      {/* Time Range Selector */}
+      <div
+        className="flex items-center gap-2 mb-6"
+        data-ocid="admin.dashboard.panel"
+      >
+        <span className="text-xs font-medium text-slate-500 mr-1">Period:</span>
+        {timeRangeOptions.map((opt) => (
+          <button
+            type="button"
+            key={opt.value}
+            data-ocid={`admin.dashboard.${opt.value}.toggle`}
+            onClick={() => setTimeRange(opt.value)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              timeRange === opt.value
+                ? "bg-blue-600 text-white shadow-sm"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Charts Row 1: User Growth + Post Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* User Growth Line Chart */}
+        <div
+          className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
+          data-ocid="admin.dashboard.user_growth.card"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="w-4 h-4 text-blue-600" />
+            <h3 className="text-sm font-semibold text-slate-700">
+              User Growth
+            </h3>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart
+              data={userGrowthData}
+              margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  fontSize: "12px",
+                }}
+                labelStyle={{ color: "#334155", fontWeight: 600 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="users"
+                stroke="#2563EB"
+                strokeWidth={2.5}
+                dot={{ fill: "#2563EB", r: 3 }}
+                activeDot={{ r: 5, fill: "#2563EB" }}
+                name="Users"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Post Activity Bar Chart */}
+        <div
+          className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
+          data-ocid="admin.dashboard.post_activity.card"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Newspaper className="w-4 h-4 text-pink-600" />
+            <h3 className="text-sm font-semibold text-slate-700">
+              Post Activity
+            </h3>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart
+              data={postActivityData}
+              margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  fontSize: "12px",
+                }}
+                labelStyle={{ color: "#334155", fontWeight: 600 }}
+              />
+              <Bar
+                dataKey="posts"
+                fill="#2563EB"
+                radius={[4, 4, 0, 0]}
+                name="Posts"
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Review Rating Distribution Donut */}
+      <div
+        className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm"
+        data-ocid="admin.dashboard.rating_dist.card"
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Star className="w-4 h-4 text-amber-500" />
+          <h3 className="text-sm font-semibold text-slate-700">
+            Review Rating Distribution
+          </h3>
+          <span className="ml-auto text-xs text-slate-500">
+            Avg:{" "}
+            <span className="font-semibold text-amber-600">{avgRating} ★</span>
+            {" · "}
+            {totalRatings} reviews
           </span>
         </div>
-        <p className="text-sm text-blue-700">
-          {stats.pendingVerifications > 0
-            ? `${stats.pendingVerifications} advocate verification${stats.pendingVerifications > 1 ? "s are" : " is"} pending review. Navigate to Advocate Verification to approve or reject.`
-            : "All advocate verifications are up to date. No pending reviews."}
-        </p>
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie
+                data={ratingData}
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={90}
+                paddingAngle={3}
+                dataKey="value"
+              >
+                {ratingData.map((entry) => (
+                  <Cell key={entry.name} fill={entry.fill} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  fontSize: "12px",
+                }}
+                formatter={(value: number, name: string) => [
+                  `${value} reviews`,
+                  name,
+                ]}
+              />
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: "12px", color: "#64748b" }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
@@ -1145,13 +1587,130 @@ function AdminVerificationPage() {
   );
 }
 
+// ─── Account Status helpers ───────────────────────────────────────────────────
+function getAccountStatuses(): Record<
+  string,
+  "Active" | "Suspended" | "Banned"
+> {
+  return safeParseObject<Record<string, "Active" | "Suspended" | "Banned">>(
+    LS_ACCOUNT_STATUS_KEY,
+  );
+}
+
+function saveAccountStatus(
+  userId: string,
+  status: "Active" | "Suspended" | "Banned",
+) {
+  const data = getAccountStatuses();
+  data[userId] = status;
+  localStorage.setItem(LS_ACCOUNT_STATUS_KEY, JSON.stringify(data));
+}
+
+function getLastLogins(): Record<string, string> {
+  return safeParseObject<Record<string, string>>(LS_LAST_LOGIN_KEY);
+}
+
+function seedLastLogins(userIds: string[]) {
+  const existing = getLastLogins();
+  const hasData = Object.keys(existing).length > 0;
+  if (hasData) return;
+  const now = Date.now();
+  const seeded: Record<string, string> = {};
+  userIds.forEach((id, idx) => {
+    const daysAgo = (idx * 2) % 30;
+    const hoursAgo = (idx * 3) % 24;
+    seeded[id] = new Date(
+      now - (daysAgo * 86400 + hoursAgo * 3600) * 1000,
+    ).toISOString();
+  });
+  localStorage.setItem(LS_LAST_LOGIN_KEY, JSON.stringify(seeded));
+}
+
+function formatLastLogin(isoDate: string | undefined): string {
+  if (!isoDate) return "Never";
+  const d = new Date(isoDate);
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// ─── Account Status Badge ─────────────────────────────────────────────────────
+function AccountStatusBadge({ status }: { status: string }) {
+  if (status === "Suspended") {
+    return (
+      <span className="flex items-center gap-1.5 text-amber-700 text-sm font-medium">
+        <span className="w-2 h-2 rounded-full bg-amber-400 inline-block shrink-0" />
+        Suspended
+      </span>
+    );
+  }
+  if (status === "Banned") {
+    return (
+      <span className="flex items-center gap-1.5 text-red-700 text-sm font-medium">
+        <span className="w-2 h-2 rounded-full bg-red-500 inline-block shrink-0" />
+        Banned
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1.5 text-emerald-700 text-sm font-medium">
+      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block shrink-0" />
+      Active
+    </span>
+  );
+}
+
 // ─── Users Page ───────────────────────────────────────────────────────────────
 function AdminUsersPage() {
-  const [usersTab, setUsersTab] = useState<"advocates" | "clients">(
-    "advocates",
-  );
   const [search, setSearch] = useState("");
-  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | "advocate" | "client">(
+    "all",
+  );
+  const [verifyFilter, setVerifyFilter] = useState<
+    "all" | "verified" | "pending" | "not_verified"
+  >("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "Active" | "Suspended" | "Banned"
+  >("all");
+
+  const [accountStatuses, setAccountStatuses] = useState<
+    Record<string, "Active" | "Suspended" | "Banned">
+  >(() => getAccountStatuses());
+  const [lastLogins, setLastLogins] = useState<Record<string, string>>({});
+
+  // Modals & dialogs
+  const [profileUser, setProfileUser] = useState<null | {
+    userId: string;
+    name: string;
+    email: string;
+    city: string;
+    state: string;
+    mobile: string;
+    accountType: "Advocate" | "Client";
+    verificationStatus: string;
+    accountStatus: string;
+    lastLogin: string;
+    practiceArea?: string;
+    courtName?: string;
+    barCouncilNumber?: string;
+    linkedAdvocateId?: string | null;
+    yearsExp?: string;
+  }>(null);
+  const [suspendTarget, setSuspendTarget] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
+  const [banTarget, setBanTarget] = useState<{
+    userId: string;
+    name: string;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    userId: string;
+    name: string;
+    accountType: "Advocate" | "Client";
+  } | null>(null);
 
   const advocates = useMemo(
     () => safeParseArray<AdvocateData>(LS_ADVOCATE_DATA_KEY),
@@ -1162,49 +1721,88 @@ function AdminUsersPage() {
     [],
   );
   const profiles = useMemo(() => getAllProfiles(), []);
-  const statuses = useMemo(() => getVerificationStatuses(), []);
-  const cases = useMemo(() => safeParseArray<CaseRecord>(LS_CASES_KEY), []);
+  const verificationStatuses = useMemo(() => getVerificationStatuses(), []);
 
-  const enrichedAdvocates = useMemo(() => {
+  // Seed last logins on mount
+  useEffect(() => {
+    const allIds = [
+      ...advocates.map((a) => a.userId),
+      ...clients.map((c) => c.userId),
+    ];
+    seedLastLogins(allIds);
+    setLastLogins(getLastLogins());
+  }, [advocates, clients]);
+
+  // Build unified user list
+  const allUsers = useMemo(() => {
+    const advUsers = advocates.map((adv) => {
+      const profile = profiles.find((p) => p.mobile === adv.userId);
+      return {
+        userId: adv.userId,
+        name: profile?.fullName || adv.name,
+        email: profile?.contactEmail || "—",
+        city: profile?.city || "—",
+        state: profile?.state || "—",
+        mobile: adv.userId,
+        accountType: "Advocate" as const,
+        verificationStatus: verificationStatuses[adv.userId] || "not_verified",
+        practiceArea: profile?.practiceArea,
+        courtName: profile?.courtName,
+        barCouncilNumber: profile?.barCouncilNumber,
+        yearsExp: profile?.yearsExp,
+        linkedAdvocateId: undefined as string | null | undefined,
+      };
+    });
+
+    const clientUsers = clients.map((c) => {
+      const profile = profiles.find((p) => p.mobile === c.userId);
+      return {
+        userId: c.userId,
+        name: profile?.fullName || c.name,
+        email: profile?.contactEmail || "—",
+        city: profile?.city || "—",
+        state: profile?.state || "—",
+        mobile: c.userId,
+        accountType: "Client" as const,
+        verificationStatus: "not_verified" as string,
+        practiceArea: undefined as string | undefined,
+        courtName: undefined as string | undefined,
+        barCouncilNumber: undefined as string | undefined,
+        yearsExp: undefined as string | undefined,
+        linkedAdvocateId: c.linkedAdvocateId,
+      };
+    });
+
+    return [...advUsers, ...clientUsers];
+  }, [advocates, clients, profiles, verificationStatuses]);
+
+  const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
-    return advocates
-      .map((adv) => {
-        const profile = profiles.find((p) => p.mobile === adv.userId);
-        const caseCount = cases.filter(
-          (c) => c.advocateId === adv.userId,
-        ).length;
-        return {
-          ...adv,
-          profile,
-          caseCount,
-          status: statuses[adv.userId] || "not_verified",
-        };
-      })
-      .filter(
-        (adv) =>
-          !q ||
-          (adv.profile?.fullName || adv.name).toLowerCase().includes(q) ||
-          (adv.profile?.city || "").toLowerCase().includes(q),
-      );
-  }, [advocates, profiles, cases, statuses, search]);
+    return allUsers.filter((u) => {
+      if (
+        q &&
+        !u.name.toLowerCase().includes(q) &&
+        !u.email.toLowerCase().includes(q)
+      )
+        return false;
+      if (typeFilter !== "all" && u.accountType.toLowerCase() !== typeFilter)
+        return false;
+      if (verifyFilter !== "all" && u.verificationStatus !== verifyFilter)
+        return false;
+      const acctStatus = accountStatuses[u.userId] || "Active";
+      if (statusFilter !== "all" && acctStatus !== statusFilter) return false;
+      return true;
+    });
+  }, [
+    allUsers,
+    search,
+    typeFilter,
+    verifyFilter,
+    statusFilter,
+    accountStatuses,
+  ]);
 
-  const enrichedClients = useMemo(() => {
-    const q = search.toLowerCase();
-    return clients
-      .map((c) => {
-        const profile = profiles.find((p) => p.mobile === c.userId);
-        const caseCount = cases.filter((cs) => cs.clientId === c.userId).length;
-        return { ...c, profile, caseCount };
-      })
-      .filter(
-        (c) =>
-          !q ||
-          (c.profile?.fullName || c.name).toLowerCase().includes(q) ||
-          (c.profile?.city || "").toLowerCase().includes(q),
-      );
-  }, [clients, profiles, cases, search]);
-
-  const statusBadge = (status: string) => {
+  function verificationStatusBadge(status: string) {
     if (status === "verified")
       return (
         <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs">
@@ -1218,213 +1816,635 @@ function AdminUsersPage() {
         </Badge>
       );
     return (
-      <Badge className="bg-gray-100 text-gray-600 border-gray-200 text-xs">
+      <Badge className="bg-gray-100 text-gray-500 border-gray-200 text-xs">
         Not Verified
       </Badge>
     );
-  };
+  }
+
+  function handleSuspend() {
+    if (!suspendTarget) return;
+    saveAccountStatus(suspendTarget.userId, "Suspended");
+    setAccountStatuses(getAccountStatuses());
+    setSuspendTarget(null);
+    toast.success(`${suspendTarget.name} has been suspended`);
+  }
+
+  function handleBan() {
+    if (!banTarget) return;
+    saveAccountStatus(banTarget.userId, "Banned");
+    setAccountStatuses(getAccountStatuses());
+    setBanTarget(null);
+    toast.success(`${banTarget.name} has been banned`);
+  }
+
+  function handleReactivate(userId: string, name: string) {
+    saveAccountStatus(userId, "Active");
+    setAccountStatuses(getAccountStatuses());
+    toast.success(`${name} account reactivated`);
+  }
+
+  function handleDelete() {
+    if (!deleteTarget) return;
+    const { userId, accountType } = deleteTarget;
+
+    if (accountType === "Advocate") {
+      const advList = safeParseArray<AdvocateData>(LS_ADVOCATE_DATA_KEY).filter(
+        (a) => a.userId !== userId,
+      );
+      localStorage.setItem(LS_ADVOCATE_DATA_KEY, JSON.stringify(advList));
+    } else {
+      const clientList = safeParseArray<ClientData>(LS_CLIENT_DATA_KEY).filter(
+        (c) => c.userId !== userId,
+      );
+      localStorage.setItem(LS_CLIENT_DATA_KEY, JSON.stringify(clientList));
+    }
+
+    // Remove from profiles
+    const profileList = safeParseArray<StoredProfile>(LS_PROFILES_KEY).filter(
+      (p) => p.mobile !== userId,
+    );
+    localStorage.setItem(LS_PROFILES_KEY, JSON.stringify(profileList));
+
+    // Remove account status
+    const statuses = getAccountStatuses();
+    delete statuses[userId];
+    localStorage.setItem(LS_ACCOUNT_STATUS_KEY, JSON.stringify(statuses));
+
+    setAccountStatuses(getAccountStatuses());
+    setDeleteTarget(null);
+    toast.success(`${deleteTarget.name} has been deleted`);
+
+    // Force re-render by reloading page state
+    window.location.reload();
+  }
+
+  function openProfile(u: (typeof allUsers)[0]) {
+    setProfileUser({
+      userId: u.userId,
+      name: u.name,
+      email: u.email,
+      city: u.city,
+      state: u.state,
+      mobile: u.mobile,
+      accountType: u.accountType,
+      verificationStatus: u.verificationStatus,
+      accountStatus: accountStatuses[u.userId] || "Active",
+      lastLogin: formatLastLogin(lastLogins[u.userId]),
+      practiceArea: u.practiceArea,
+      courtName: u.courtName,
+      barCouncilNumber: u.barCouncilNumber,
+      linkedAdvocateId: u.linkedAdvocateId,
+      yearsExp: u.yearsExp,
+    });
+  }
 
   return (
     <div>
-      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-700">Users</h2>
-          <p className="text-sm text-slate-500">
-            Manage all advocates and clients on the platform
-          </p>
-        </div>
-        <div className="sm:ml-auto relative">
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-slate-700">Users</h2>
+        <p className="text-sm text-slate-500">
+          Manage all {allUsers.length} users on the platform
+        </p>
+      </div>
+
+      {/* Filter bar */}
+      <div className="mb-4 flex flex-col sm:flex-row gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <Input
-            placeholder="Search by name or city..."
+            placeholder="Search by name or email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 w-64"
+            className="pl-9"
             data-ocid="admin.users.search_input"
           />
         </div>
+        <Select
+          value={typeFilter}
+          onValueChange={(v) => setTypeFilter(v as typeof typeFilter)}
+        >
+          <SelectTrigger
+            className="w-40"
+            data-ocid="admin.users.type_filter.select"
+          >
+            <SelectValue placeholder="Account Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="advocate">Advocate</SelectItem>
+            <SelectItem value="client">Client</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={verifyFilter}
+          onValueChange={(v) => setVerifyFilter(v as typeof verifyFilter)}
+        >
+          <SelectTrigger
+            className="w-44"
+            data-ocid="admin.users.verification_filter.select"
+          >
+            <SelectValue placeholder="Verification" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Verification</SelectItem>
+            <SelectItem value="verified">Verified</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="not_verified">Not Verified</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
+        >
+          <SelectTrigger
+            className="w-40"
+            data-ocid="admin.users.status_filter.select"
+          >
+            <SelectValue placeholder="Account Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Suspended">Suspended</SelectItem>
+            <SelectItem value="Banned">Banned</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <Tabs
-        value={usersTab}
-        onValueChange={(v) => setUsersTab(v as "advocates" | "clients")}
+      {/* Table */}
+      <div
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden"
+        data-ocid="admin.users.table"
       >
-        <TabsList className="mb-4">
-          <TabsTrigger value="advocates" data-ocid="admin.users.advocates_tab">
-            Advocates ({advocates.length})
-          </TabsTrigger>
-          <TabsTrigger value="clients" data-ocid="admin.users.clients_tab">
-            Clients ({clients.length})
-          </TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto">
+          {/* Table header */}
+          <div className="hidden md:grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_1fr_1.2fr_1fr] gap-2 px-4 py-3 bg-slate-50 border-b border-gray-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <div>Name</div>
+            <div>Email</div>
+            <div>City</div>
+            <div>Type</div>
+            <div>Verification</div>
+            <div>Status</div>
+            <div>Last Login</div>
+            <div>Actions</div>
+          </div>
 
-        <TabsContent value="advocates">
-          {enrichedAdvocates.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              No advocates found
+          {/* Table rows */}
+          {filteredUsers.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center py-16 text-slate-400"
+              data-ocid="admin.users.empty_state"
+            >
+              <Users className="w-10 h-10 mb-3 opacity-30" />
+              <p className="text-sm font-medium">No users match your filters</p>
+              <p className="text-xs mt-1">
+                Try adjusting your search or filter criteria
+              </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {enrichedAdvocates.map((adv) => (
-                <div
-                  key={adv.userId}
-                  className="bg-white rounded-xl border border-gray-200 overflow-hidden"
-                >
-                  <button
-                    type="button"
-                    className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 text-left"
-                    onClick={() =>
-                      setExpandedRow(
-                        expandedRow === adv.userId ? null : adv.userId,
-                      )
-                    }
+            <div>
+              {filteredUsers.map((u, idx) => {
+                const rowIdx = idx + 1;
+                const acctStatus = accountStatuses[u.userId] || "Active";
+                return (
+                  <div
+                    key={u.userId}
+                    className="grid md:grid-cols-[2fr_1.5fr_1fr_1fr_1fr_1fr_1.2fr_1fr] gap-2 px-4 py-3.5 border-b border-gray-50 hover:bg-slate-50/70 transition-colors items-center"
+                    data-ocid={`admin.users.row.${rowIdx}`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700">
-                        {(adv.profile?.fullName || adv.name)
+                    {/* Name */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
+                          u.accountType === "Advocate"
+                            ? "bg-blue-100 text-blue-700"
+                            : "bg-violet-100 text-violet-700"
+                        }`}
+                      >
+                        {u.name
                           .split(" ")
                           .map((w) => w[0])
                           .join("")
                           .slice(0, 2)
                           .toUpperCase()}
                       </div>
-                      <div>
-                        <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                          {adv.profile?.fullName || adv.name}
-                          {statusBadge(adv.status)}
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-800 text-sm truncate">
+                          {u.name}
                         </div>
-                        <div className="text-xs text-slate-500">
-                          {adv.profile?.practiceArea || "—"} •{" "}
-                          {adv.profile?.city || "—"},{" "}
-                          {adv.profile?.state || "—"}
+                        <div className="text-xs text-slate-400 md:hidden">
+                          {u.city}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-slate-500">
-                      <span>{adv.caseCount} cases</span>
-                      {expandedRow === adv.userId ? (
-                        <ChevronDown className="w-4 h-4" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4" />
-                      )}
-                    </div>
-                  </button>
-                  {expandedRow === adv.userId && (
-                    <div className="border-t px-4 py-3 bg-slate-50 text-sm grid grid-cols-2 gap-2 text-slate-600">
-                      <div>
-                        <span className="text-slate-400 text-xs">Mobile:</span>{" "}
-                        {adv.userId}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">Email:</span>{" "}
-                        {adv.profile?.contactEmail || "—"}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">Court:</span>{" "}
-                        {adv.profile?.courtName || "—"}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">
-                          Bar Council #:
-                        </span>{" "}
-                        {adv.profile?.barCouncilNumber || "—"}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">
-                          Experience:
-                        </span>{" "}
-                        {adv.profile?.yearsExp
-                          ? `${adv.profile.yearsExp} yrs`
-                          : "—"}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">
-                          Referral:
-                        </span>{" "}
-                        <span className="font-mono text-xs">
-                          {adv.referralCode}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </TabsContent>
 
-        <TabsContent value="clients">
-          {enrichedClients.length === 0 ? (
-            <div className="text-center py-12 text-slate-400">
-              No clients found
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {enrichedClients.map((c) => (
-                <div
-                  key={c.userId}
-                  className="bg-white rounded-xl border border-gray-200 overflow-hidden"
-                >
-                  <button
-                    type="button"
-                    className="w-full flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 text-left"
-                    onClick={() =>
-                      setExpandedRow(expandedRow === c.userId ? null : c.userId)
-                    }
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-violet-100 flex items-center justify-center text-sm font-bold text-violet-700">
-                        {(c.profile?.fullName || c.name)
-                          .split(" ")
-                          .map((w) => w[0])
-                          .join("")
-                          .slice(0, 2)
-                          .toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-slate-800 text-sm">
-                          {c.profile?.fullName || c.name}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {c.profile?.city || "—"}, {c.profile?.state || "—"}
-                        </div>
-                      </div>
+                    {/* Email */}
+                    <div className="text-sm text-slate-600 truncate hidden md:block">
+                      {u.email}
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-slate-500">
-                      <span>{c.caseCount} cases</span>
-                      {expandedRow === c.userId ? (
-                        <ChevronDown className="w-4 h-4" />
+
+                    {/* City */}
+                    <div className="text-sm text-slate-600 hidden md:block">
+                      {u.city}
+                    </div>
+
+                    {/* Account Type */}
+                    <div className="hidden md:block">
+                      {u.accountType === "Advocate" ? (
+                        <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                          Advocate
+                        </Badge>
                       ) : (
-                        <ChevronRight className="w-4 h-4" />
+                        <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs">
+                          Client
+                        </Badge>
                       )}
                     </div>
-                  </button>
-                  {expandedRow === c.userId && (
-                    <div className="border-t px-4 py-3 bg-slate-50 text-sm grid grid-cols-2 gap-2 text-slate-600">
-                      <div>
-                        <span className="text-slate-400 text-xs">Mobile:</span>{" "}
-                        {c.userId}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">Email:</span>{" "}
-                        {c.profile?.contactEmail || "—"}
-                      </div>
-                      <div>
-                        <span className="text-slate-400 text-xs">
-                          Linked Advocate:
-                        </span>{" "}
-                        {c.linkedAdvocateId || "None"}
-                      </div>
+
+                    {/* Verification */}
+                    <div className="hidden md:block">
+                      {verificationStatusBadge(u.verificationStatus)}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {/* Account Status */}
+                    <div className="hidden md:block">
+                      <AccountStatusBadge status={acctStatus} />
+                    </div>
+
+                    {/* Last Login */}
+                    <div className="text-sm text-slate-500 hidden md:block">
+                      {formatLastLogin(lastLogins[u.userId])}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 justify-end md:justify-start">
+                      <button
+                        type="button"
+                        onClick={() => openProfile(u)}
+                        className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition-colors"
+                        title="View Profile"
+                        data-ocid={`admin.users.view_profile_button.${rowIdx}`}
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      {acctStatus === "Active" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSuspendTarget({ userId: u.userId, name: u.name })
+                          }
+                          className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-500 hover:text-amber-600 transition-colors"
+                          title="Suspend"
+                          data-ocid={`admin.users.suspend_button.${rowIdx}`}
+                        >
+                          <UserX className="w-4 h-4" />
+                        </button>
+                      )}
+                      {acctStatus !== "Banned" && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBanTarget({ userId: u.userId, name: u.name })
+                          }
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors"
+                          title="Ban"
+                          data-ocid={`admin.users.ban_button.${rowIdx}`}
+                        >
+                          <Ban className="w-4 h-4" />
+                        </button>
+                      )}
+                      {(acctStatus === "Suspended" ||
+                        acctStatus === "Banned") && (
+                        <button
+                          type="button"
+                          onClick={() => handleReactivate(u.userId, u.name)}
+                          className="p-1.5 rounded-lg hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 transition-colors"
+                          title="Reactivate"
+                          data-ocid={`admin.users.reactivate_button.${rowIdx}`}
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDeleteTarget({
+                            userId: u.userId,
+                            name: u.name,
+                            accountType: u.accountType,
+                          })
+                        }
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-slate-500 hover:text-red-600 transition-colors"
+                        title="Delete"
+                        data-ocid={`admin.users.delete_button.${rowIdx}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </TabsContent>
-      </Tabs>
+        </div>
+
+        {/* Footer count */}
+        {filteredUsers.length > 0 && (
+          <div className="px-4 py-2.5 bg-slate-50 border-t border-gray-100 text-xs text-slate-400">
+            Showing {filteredUsers.length} of {allUsers.length} users
+          </div>
+        )}
+      </div>
+
+      {/* ─── View Profile Modal ─────────────────────────────── */}
+      <Dialog
+        open={!!profileUser}
+        onOpenChange={(open) => {
+          if (!open) setProfileUser(null);
+        }}
+      >
+        <DialogContent
+          className="max-w-lg"
+          data-ocid="admin.users.profile_modal"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
+                  profileUser?.accountType === "Advocate"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-violet-100 text-violet-700"
+                }`}
+              >
+                {profileUser?.name
+                  .split(" ")
+                  .map((w) => w[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </div>
+              <span>{profileUser?.name}</span>
+            </DialogTitle>
+          </DialogHeader>
+          {profileUser && (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Email
+                  </span>
+                  <span className="text-slate-700">{profileUser.email}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Mobile
+                  </span>
+                  <span className="text-slate-700">{profileUser.mobile}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    City
+                  </span>
+                  <span className="text-slate-700">{profileUser.city}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    State
+                  </span>
+                  <span className="text-slate-700">{profileUser.state}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Account Type
+                  </span>
+                  {profileUser.accountType === "Advocate" ? (
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">
+                      Advocate
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs">
+                      Client
+                    </Badge>
+                  )}
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Account Status
+                  </span>
+                  <AccountStatusBadge status={profileUser.accountStatus} />
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Verification
+                  </span>
+                  {verificationStatusBadge(profileUser.verificationStatus)}
+                </div>
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">
+                    Last Login
+                  </span>
+                  <span className="text-slate-700">
+                    {profileUser.lastLogin}
+                  </span>
+                </div>
+              </div>
+
+              {profileUser.accountType === "Advocate" && (
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">
+                      Practice Area
+                    </span>
+                    <span className="text-slate-700">
+                      {profileUser.practiceArea || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">
+                      Court
+                    </span>
+                    <span className="text-slate-700">
+                      {profileUser.courtName || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">
+                      Bar Council #
+                    </span>
+                    <span className="text-slate-700 font-mono text-xs">
+                      {profileUser.barCouncilNumber || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 block mb-0.5">
+                      Experience
+                    </span>
+                    <span className="text-slate-700">
+                      {profileUser.yearsExp
+                        ? `${profileUser.yearsExp} yrs`
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {profileUser.accountType === "Client" &&
+                profileUser.linkedAdvocateId && (
+                  <div className="pt-2 border-t border-gray-100">
+                    <span className="text-xs text-slate-400 block mb-0.5">
+                      Linked Advocate
+                    </span>
+                    <span className="text-slate-700 text-sm">
+                      {profileUser.linkedAdvocateId}
+                    </span>
+                  </div>
+                )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setProfileUser(null)}
+              data-ocid="admin.users.profile_close_button"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Suspend Confirmation Dialog ───────────────────── */}
+      <Dialog
+        open={!!suspendTarget}
+        onOpenChange={(open) => {
+          if (!open) setSuspendTarget(null);
+        }}
+      >
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.users.suspend_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <UserX className="w-5 h-5" />
+              Suspend Account
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Are you sure you want to suspend{" "}
+            <strong>{suspendTarget?.name}</strong>? They will lose access until
+            reactivated.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setSuspendTarget(null)}
+              data-ocid="admin.users.suspend_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={handleSuspend}
+              data-ocid="admin.users.suspend_confirm_button"
+            >
+              Suspend Account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Ban Confirmation Dialog ────────────────────────── */}
+      <Dialog
+        open={!!banTarget}
+        onOpenChange={(open) => {
+          if (!open) setBanTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm" data-ocid="admin.users.ban_dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <Ban className="w-5 h-5" />
+              Ban Account
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Are you sure you want to ban <strong>{banTarget?.name}</strong>?
+            This is a stronger action than suspension.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setBanTarget(null)}
+              data-ocid="admin.users.ban_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleBan}
+              data-ocid="admin.users.ban_confirm_button"
+            >
+              Ban Account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Delete Confirmation Dialog ─────────────────────── */}
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.users.delete_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <Trash2 className="w-5 h-5" />
+              Delete Account
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Are you sure you want to permanently delete{" "}
+            <strong>{deleteTarget?.name}</strong>? This action cannot be undone.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              data-ocid="admin.users.delete_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              data-ocid="admin.users.delete_confirm_button"
+            >
+              Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+// Date boundary helper (outside component so it's stable)
+function reviewDateInRange(iso: string, range: string): boolean {
+  if (range === "all") return true;
+  const d = new Date(iso).getTime();
+  const now = Date.now();
+  if (range === "today") return d >= now - 86400 * 1000;
+  if (range === "week") return d >= now - 7 * 86400 * 1000;
+  if (range === "month") return d >= now - 30 * 86400 * 1000;
+  return true;
 }
 
 // ─── Reviews Page ─────────────────────────────────────────────────────────────
@@ -1435,7 +2455,25 @@ function AdminReviewsPage() {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     ),
   );
-  const [filterRating, setFilterRating] = useState<string>("all");
+
+  // Flags: Set of flagged review IDs, persisted in localStorage
+  const [flaggedIds, setFlaggedIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(LS_REVIEW_FLAGS_KEY);
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+
+  const [search, setSearch] = useState("");
+  const [filterAdvocate, setFilterAdvocate] = useState("all");
+  const [filterRating, setFilterRating] = useState("all");
+  const [filterDate, setFilterDate] = useState("all");
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "normal" | "flagged"
+  >("all");
+  const [viewTarget, setViewTarget] = useState<AdvocateReview | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const advocates = useMemo(
@@ -1444,23 +2482,72 @@ function AdminReviewsPage() {
   );
   const profiles = useMemo(() => getAllProfiles(), []);
 
-  function getAdvocateName(id: string): string {
-    const profile = profiles.find((p) => p.mobile === id);
-    if (profile) return profile.fullName;
-    const adv = advocates.find((a) => a.userId === id);
-    return adv?.name || id;
-  }
+  const getAdvocateName = useCallback(
+    (id: string): string => {
+      const profile = profiles.find((p) => p.mobile === id);
+      if (profile) return profile.fullName;
+      const adv = advocates.find((a) => a.userId === id);
+      return adv?.name || id;
+    },
+    [profiles, advocates],
+  );
+
+  // Unique advocate options for filter dropdown
+  const advocateOptions = useMemo(() => {
+    const ids = [...new Set(reviews.map((r) => r.advocateId))];
+    return ids.map((id) => ({ id, name: getAdvocateName(id) }));
+  }, [reviews, getAdvocateName]);
 
   const filteredReviews = useMemo(() => {
-    if (filterRating === "all") return reviews;
-    const r = Number.parseInt(filterRating);
-    return reviews.filter((rev) => rev.rating === r);
-  }, [reviews, filterRating]);
+    const q = search.toLowerCase();
+    return reviews.filter((rev) => {
+      const advName = getAdvocateName(rev.advocateId).toLowerCase();
+      if (
+        q &&
+        !rev.clientName.toLowerCase().includes(q) &&
+        !advName.includes(q)
+      )
+        return false;
+      if (filterAdvocate !== "all" && rev.advocateId !== filterAdvocate)
+        return false;
+      if (
+        filterRating !== "all" &&
+        rev.rating !== Number.parseInt(filterRating)
+      )
+        return false;
+      if (!reviewDateInRange(rev.createdAt, filterDate)) return false;
+      const isFlagged = flaggedIds.has(rev.id);
+      if (filterStatus === "flagged" && !isFlagged) return false;
+      if (filterStatus === "normal" && isFlagged) return false;
+      return true;
+    });
+  }, [
+    reviews,
+    search,
+    filterAdvocate,
+    filterRating,
+    filterDate,
+    filterStatus,
+    flaggedIds,
+    getAdvocateName,
+  ]);
 
   const avgRating = useMemo(() => {
     if (!reviews.length) return 0;
     return reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
   }, [reviews]);
+
+  const flaggedCount = flaggedIds.size;
+
+  function toggleFlag(id: string) {
+    setFlaggedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      localStorage.setItem(LS_REVIEW_FLAGS_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }
 
   function handleDelete(id: string) {
     const all = safeParseArray<AdvocateReview>(LS_REVIEWS_KEY);
@@ -1468,138 +2555,518 @@ function AdminReviewsPage() {
       LS_REVIEWS_KEY,
       JSON.stringify(all.filter((r) => r.id !== id)),
     );
+    // Also clear flag
+    setFlaggedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      localStorage.setItem(LS_REVIEW_FLAGS_KEY, JSON.stringify([...next]));
+      return next;
+    });
     setReviews((prev) => prev.filter((r) => r.id !== id));
     setDeleteTarget(null);
-    toast.success("Review deleted");
+    toast.success("Review deleted and removed from advocate profile");
   }
 
-  function StarRow({ rating }: { rating: number }) {
+  function StarRow({
+    rating,
+    size = "sm",
+  }: { rating: number; size?: "sm" | "md" }) {
+    const cls = size === "md" ? "w-4.5 h-4.5" : "w-3.5 h-3.5";
     return (
       <div className="flex items-center gap-0.5">
         {[1, 2, 3, 4, 5].map((i) => (
           <Star
             key={i}
-            className={`w-3.5 h-3.5 ${i <= rating ? "text-amber-400 fill-amber-400" : "text-gray-200 fill-gray-200"}`}
+            className={`${cls} ${i <= rating ? "text-amber-400 fill-amber-400" : "text-gray-200 fill-gray-200"}`}
           />
         ))}
       </div>
     );
   }
 
+  function ReviewStatusBadge({ flagged }: { flagged: boolean }) {
+    if (flagged) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-300">
+          <Flag className="w-3 h-3" />
+          Flagged
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500 border border-gray-200">
+        Normal
+      </span>
+    );
+  }
+
   return (
     <div>
-      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-700">Reviews</h2>
-          <p className="text-sm text-slate-500">
-            {reviews.length} total reviews • Average rating:{" "}
-            <span className="font-semibold text-amber-600">
-              ⭐ {avgRating.toFixed(1)}
-            </span>
-          </p>
+      {/* Page heading */}
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-slate-700">Reviews</h2>
+        <p className="text-sm text-slate-500">
+          Moderate client reviews across all advocates
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"
+        data-ocid="admin.reviews.summary_section"
+      >
+        <div
+          className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-4"
+          data-ocid="admin.reviews.total_card"
+        >
+          <div className="p-3 rounded-xl bg-blue-50">
+            <Star className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {reviews.length}
+            </div>
+            <div className="text-sm text-slate-500">Total Reviews</div>
+          </div>
         </div>
-        <div className="sm:ml-auto flex items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-400" />
-          <Select value={filterRating} onValueChange={setFilterRating}>
-            <SelectTrigger
-              className="w-36"
-              data-ocid="admin.reviews.filter.select"
-            >
-              <SelectValue placeholder="Filter by rating" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Ratings</SelectItem>
-              <SelectItem value="5">5 Stars</SelectItem>
-              <SelectItem value="4">4 Stars</SelectItem>
-              <SelectItem value="3">3 Stars</SelectItem>
-              <SelectItem value="2">2 Stars</SelectItem>
-              <SelectItem value="1">1 Star</SelectItem>
-            </SelectContent>
-          </Select>
+        <div
+          className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-4"
+          data-ocid="admin.reviews.avg_card"
+        >
+          <div className="p-3 rounded-xl bg-amber-50">
+            <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {reviews.length ? avgRating.toFixed(1) : "—"}
+            </div>
+            <div className="text-sm text-slate-500">Average Rating</div>
+          </div>
+        </div>
+        <div
+          className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-4"
+          data-ocid="admin.reviews.flagged_card"
+        >
+          <div className="p-3 rounded-xl bg-amber-50">
+            <Flag className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-slate-800">
+              {flaggedCount}
+            </div>
+            <div className="text-sm text-slate-500">Flagged Reviews</div>
+          </div>
         </div>
       </div>
 
+      {/* Filter bar */}
+      <div className="mb-4 flex flex-col sm:flex-row gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search by client or advocate name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            data-ocid="admin.reviews.search_input"
+          />
+        </div>
+        <Select value={filterAdvocate} onValueChange={setFilterAdvocate}>
+          <SelectTrigger
+            className="w-44"
+            data-ocid="admin.reviews.advocate_filter.select"
+          >
+            <SelectValue placeholder="All Advocates" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Advocates</SelectItem>
+            {advocateOptions.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                {a.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterRating} onValueChange={setFilterRating}>
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reviews.rating_filter.select"
+          >
+            <SelectValue placeholder="All Ratings" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Ratings</SelectItem>
+            <SelectItem value="5">5 Stars</SelectItem>
+            <SelectItem value="4">4 Stars</SelectItem>
+            <SelectItem value="3">3 Stars</SelectItem>
+            <SelectItem value="2">2 Stars</SelectItem>
+            <SelectItem value="1">1 Star</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterDate} onValueChange={setFilterDate}>
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reviews.date_filter.select"
+          >
+            <SelectValue placeholder="All Time" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="week">Last 7 Days</SelectItem>
+            <SelectItem value="month">Last 30 Days</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={filterStatus}
+          onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}
+        >
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reviews.status_filter.select"
+          >
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="normal">Normal</SelectItem>
+            <SelectItem value="flagged">Flagged</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Result count */}
+      <div className="text-xs text-slate-400 mb-3">
+        Showing {filteredReviews.length} of {reviews.length} reviews
+      </div>
+
+      {/* Reviews table */}
       {filteredReviews.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
-          <Star className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>No reviews found</p>
+        <div
+          className="flex flex-col items-center justify-center py-16 text-slate-400"
+          data-ocid="admin.reviews.empty_state"
+        >
+          <Star className="w-12 h-12 mb-3 opacity-30" />
+          <p className="font-medium text-sm">No reviews match your filters</p>
+          <p className="text-xs mt-1">
+            Try adjusting your search or filter criteria
+          </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredReviews.map((review, idx) => (
-            <div
-              key={review.id}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm p-4"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1">
+        <div
+          className="bg-white rounded-xl border border-gray-200 overflow-hidden"
+          data-ocid="admin.reviews.table"
+        >
+          {/* Table header */}
+          <div className="hidden lg:grid grid-cols-[1.4fr_1.4fr_auto_2.5fr_auto_auto_auto] gap-3 px-5 py-3 bg-slate-50 border-b border-gray-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <div>Client</div>
+            <div>Advocate</div>
+            <div>Rating</div>
+            <div>Review</div>
+            <div>Date</div>
+            <div>Status</div>
+            <div>Actions</div>
+          </div>
+
+          {/* Table rows */}
+          <div>
+            {filteredReviews.map((review, idx) => {
+              const isFlagged = flaggedIds.has(review.id);
+              return (
+                <div
+                  key={review.id}
+                  className={`grid lg:grid-cols-[1.4fr_1.4fr_auto_2.5fr_auto_auto_auto] gap-3 px-5 py-4 border-b border-gray-50 last:border-0 items-start transition-colors ${
+                    isFlagged
+                      ? "bg-amber-50 border-amber-100 hover:bg-amber-100/60"
+                      : "hover:bg-slate-50/70"
+                  }`}
+                  data-ocid={`admin.reviews.row.${idx + 1}`}
+                >
+                  {/* Client */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center text-xs font-bold text-violet-700 shrink-0">
+                        {review.clientName
+                          .split(" ")
+                          .map((w) => w[0])
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium text-slate-800 truncate">
+                        {review.clientName}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Advocate */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shrink-0">
+                        {getAdvocateName(review.advocateId)
+                          .split(" ")
+                          .map((w) => w[0])
+                          .join("")
+                          .slice(0, 2)
+                          .toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium text-blue-600 truncate">
+                        {getAdvocateName(review.advocateId)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Rating */}
+                  <div className="flex items-center gap-1 shrink-0">
                     <StarRow rating={review.rating} />
-                    <span className="text-sm font-semibold text-slate-800">
-                      {review.clientName}
-                    </span>
-                    <span className="text-xs text-slate-400">→</span>
-                    <span className="text-sm text-blue-600 font-medium">
-                      {getAdvocateName(review.advocateId)}
+                    <span className="text-xs text-slate-500 font-medium ml-1">
+                      {review.rating}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-600 mt-1 line-clamp-3">
-                    {review.text}
-                  </p>
-                  {review.advocateReply && (
-                    <div className="mt-2 pl-3 border-l-2 border-blue-200">
-                      <p className="text-xs text-slate-500 font-medium mb-0.5">
-                        Advocate replied:
-                      </p>
-                      <p className="text-sm text-slate-600 line-clamp-2">
-                        {review.advocateReply}
-                      </p>
-                    </div>
-                  )}
-                  <div className="text-xs text-slate-400 mt-2">
+
+                  {/* Review text */}
+                  <div className="min-w-0">
+                    <p className="text-sm text-slate-600 line-clamp-2">
+                      {review.text}
+                    </p>
+                    {review.advocateReply && (
+                      <div className="mt-1.5 pl-2.5 border-l-2 border-blue-200">
+                        <p className="text-xs text-slate-400 italic line-clamp-1">
+                          Reply: {review.advocateReply}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Date */}
+                  <div className="text-xs text-slate-400 shrink-0 whitespace-nowrap">
                     {new Date(review.createdAt).toLocaleDateString("en-IN", {
                       day: "numeric",
                       month: "short",
                       year: "numeric",
                     })}
                   </div>
+
+                  {/* Status badge */}
+                  <div className="shrink-0">
+                    <ReviewStatusBadge flagged={isFlagged} />
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setViewTarget(review)}
+                      className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                      title="View full review"
+                      data-ocid={`admin.reviews.view_button.${idx + 1}`}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleFlag(review.id)}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        isFlagged
+                          ? "text-amber-600 hover:bg-amber-100 hover:text-amber-700"
+                          : "text-slate-400 hover:bg-amber-50 hover:text-amber-600"
+                      }`}
+                      title={isFlagged ? "Unflag review" : "Flag review"}
+                      data-ocid={`admin.reviews.flag_button.${idx + 1}`}
+                    >
+                      <Flag
+                        className={`w-4 h-4 ${isFlagged ? "fill-amber-400" : ""}`}
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTarget(review.id)}
+                      className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                      title="Delete review"
+                      data-ocid={`admin.reviews.delete_button.${idx + 1}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0"
-                  onClick={() => setDeleteTarget(review.id)}
-                  data-ocid={`admin.reviews.delete_button.${idx + 1}`}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
+              );
+            })}
+          </div>
         </div>
       )}
+
+      {/* View Full Review Modal */}
+      <Dialog
+        open={!!viewTarget}
+        onOpenChange={(o) => !o && setViewTarget(null)}
+      >
+        <DialogContent
+          className="max-w-lg"
+          data-ocid="admin.reviews.view_modal"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+              Full Review
+            </DialogTitle>
+          </DialogHeader>
+          {viewTarget && (
+            <div className="space-y-4 text-sm">
+              {/* Meta */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Client
+                  </div>
+                  <div className="font-semibold text-slate-800">
+                    {viewTarget.clientName}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Advocate
+                  </div>
+                  <div className="font-semibold text-blue-600">
+                    {getAdvocateName(viewTarget.advocateId)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Rating
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <Star
+                          key={i}
+                          className={`w-4 h-4 ${i <= viewTarget.rating ? "text-amber-400 fill-amber-400" : "text-gray-200 fill-gray-200"}`}
+                        />
+                      ))}
+                    </div>
+                    <span className="font-semibold text-slate-700">
+                      {viewTarget.rating}/5
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Date
+                  </div>
+                  <div className="text-slate-700">
+                    {new Date(viewTarget.createdAt).toLocaleDateString(
+                      "en-IN",
+                      {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      },
+                    )}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Status
+                  </div>
+                  <ReviewStatusBadge flagged={flaggedIds.has(viewTarget.id)} />
+                </div>
+              </div>
+
+              {/* Review text */}
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-100">
+                <div className="text-xs text-slate-400 mb-1.5 font-medium uppercase">
+                  Review
+                </div>
+                <p className="text-slate-700 leading-relaxed">
+                  {viewTarget.text}
+                </p>
+              </div>
+
+              {/* Advocate reply */}
+              {viewTarget.advocateReply && (
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                  <div className="text-xs text-blue-500 mb-1.5 font-medium uppercase">
+                    Advocate's Reply
+                  </div>
+                  <p className="text-slate-700 leading-relaxed">
+                    {viewTarget.advocateReply}
+                  </p>
+                  {viewTarget.replyUpdatedAt && (
+                    <p className="text-xs text-blue-400 mt-1.5">
+                      Replied on{" "}
+                      {new Date(viewTarget.replyUpdatedAt).toLocaleDateString(
+                        "en-IN",
+                        {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        },
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => viewTarget && toggleFlag(viewTarget.id)}
+              className={
+                flaggedIds.has(viewTarget?.id ?? "")
+                  ? "border-amber-300 text-amber-700 hover:bg-amber-50"
+                  : ""
+              }
+              data-ocid="admin.reviews.view_flag_button"
+            >
+              <Flag
+                className={`w-4 h-4 mr-1.5 ${flaggedIds.has(viewTarget?.id ?? "") ? "fill-amber-400 text-amber-600" : ""}`}
+              />
+              {flaggedIds.has(viewTarget?.id ?? "") ? "Unflag" : "Flag"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setViewTarget(null)}
+              data-ocid="admin.reviews.view_close_button"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirm Dialog */}
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.reviews.delete_dialog"
+        >
           <DialogHeader>
-            <DialogTitle>Delete Review?</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <Trash2 className="w-4 h-4" />
+              Delete Review?
+            </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-slate-600">
-            This will permanently remove the review from the platform.
+            This will permanently remove the review from the platform and it
+            will no longer appear on the advocate's profile.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              data-ocid="admin.reviews.delete_cancel_button"
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
+              data-ocid="admin.reviews.delete_confirm_button"
             >
-              Delete
+              Delete Permanently
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1608,7 +3075,1034 @@ function AdminReviewsPage() {
   );
 }
 
-// ─── Reports Page ─────────────────────────────────────────────────────────────
+// ─── Reports Seed & User Reports Page ────────────────────────────────────────
+
+function seedDemoReports() {
+  if (localStorage.getItem("myadvocate_reports_seeded_v1")) return;
+  const now = Date.now();
+  const MS = 1000;
+  const demoReports: UserReport[] = [
+    {
+      id: "rep_001",
+      reporterId: "9900000001",
+      reporterName: "Rohit Mehta",
+      reportedId: "9800000001",
+      reportedName: "Arjun Sharma",
+      reportType: "User",
+      reason: "Misconduct",
+      note: "Unprofessional behavior in court proceedings.",
+      status: "Pending",
+      createdAt: new Date(now - 2 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_002",
+      reporterId: "9900000002",
+      reporterName: "Kavitha Subramaniam",
+      reportedId: "9800000002",
+      reportedName: "Priya Nair",
+      reportType: "Post",
+      reportedContentPreview: "Important reminder for matrimonial cases...",
+      reason: "Inappropriate Content",
+      status: "Ignored",
+      createdAt: new Date(now - 5 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_003",
+      reporterId: "9900000003",
+      reporterName: "Suresh Iyer",
+      reportedId: "9800000003",
+      reportedName: "Ravi Krishnan",
+      reportType: "Message",
+      reportedContentPreview: "Chat conversation",
+      reason: "Harassment",
+      note: "Repeated unsolicited messages demanding fees upfront.",
+      status: "Warned",
+      createdAt: new Date(now - 8 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_004",
+      reporterId: "9900000004",
+      reporterName: "Anjali Rajput",
+      reportedId: "9800000004",
+      reportedName: "Meera Verma",
+      reportType: "User",
+      reason: "Fake Profile",
+      note: "Bar Council number appears to be invalid.",
+      status: "Suspended",
+      createdAt: new Date(now - 12 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_005",
+      reporterId: "9900000005",
+      reporterName: "Deepika Pillai",
+      reportedId: "9800000005",
+      reportedName: "Sameer Bose",
+      reportType: "Post",
+      reportedContentPreview: "GST Council update: legal services...",
+      reason: "Spam",
+      status: "Pending",
+      createdAt: new Date(now - 1 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_006",
+      reporterId: "9900000006",
+      reporterName: "Vishal Malhotra",
+      reportedId: "9800000001",
+      reportedName: "Arjun Sharma",
+      reportType: "Message",
+      reportedContentPreview: "Chat conversation",
+      reason: "Harassment",
+      status: "Pending",
+      createdAt: new Date(now - 3 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_007",
+      reporterId: "9900000007",
+      reporterName: "Meenakshi Gopalan",
+      reportedId: "9800000002",
+      reportedName: "Priya Nair",
+      reportType: "User",
+      reason: "Other",
+      note: "Soliciting clients outside of the platform.",
+      status: "Pending",
+      createdAt: new Date(now - 15 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_008",
+      reporterId: "9900000008",
+      reporterName: "Aditya Srinivasan",
+      reportedId: "9800000003",
+      reportedName: "Ravi Krishnan",
+      reportType: "Post",
+      reportedContentPreview: "NCLT Chennai Bench recently ruled...",
+      reason: "Inappropriate Content",
+      status: "Ignored",
+      createdAt: new Date(now - 20 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_009",
+      reporterId: "9900000009",
+      reporterName: "Nandita Chakraborty",
+      reportedId: "9800000004",
+      reportedName: "Meera Verma",
+      reportType: "User",
+      reason: "Spam",
+      status: "Banned",
+      createdAt: new Date(now - 25 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_010",
+      reporterId: "9900000010",
+      reporterName: "Prakash Venkataraman",
+      reportedId: "9800000005",
+      reportedName: "Sameer Bose",
+      reportType: "Message",
+      reportedContentPreview: "Chat conversation",
+      reason: "Misconduct",
+      status: "Warned",
+      createdAt: new Date(now - 30 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_011",
+      reporterId: "9900000001",
+      reporterName: "Rohit Mehta",
+      reportedId: "9800000003",
+      reportedName: "Ravi Krishnan",
+      reportType: "Post",
+      reportedContentPreview: "Excited to share that my article...",
+      reason: "Spam",
+      status: "Pending",
+      createdAt: new Date(now - 4 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_012",
+      reporterId: "9900000002",
+      reporterName: "Kavitha Subramaniam",
+      reportedId: "9800000001",
+      reportedName: "Arjun Sharma",
+      reportType: "User",
+      reason: "Fake Profile",
+      note: "Credentials not verifiable through Bar Council portal.",
+      status: "Pending",
+      createdAt: new Date(now - 6 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_013",
+      reporterId: "9900000003",
+      reporterName: "Suresh Iyer",
+      reportedId: "9800000002",
+      reportedName: "Priya Nair",
+      reportType: "Message",
+      reportedContentPreview: "Chat conversation",
+      reason: "Other",
+      status: "Ignored",
+      createdAt: new Date(now - 40 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_014",
+      reporterId: "9900000004",
+      reporterName: "Anjali Rajput",
+      reportedId: "9800000005",
+      reportedName: "Sameer Bose",
+      reportType: "Post",
+      reportedContentPreview: "GST Council update...",
+      reason: "Inappropriate Content",
+      status: "Pending",
+      createdAt: new Date(now - 50 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_015",
+      reporterId: "9900000005",
+      reporterName: "Deepika Pillai",
+      reportedId: "9800000004",
+      reportedName: "Meera Verma",
+      reportType: "User",
+      reason: "Harassment",
+      note: "Multiple clients have complained about communication style.",
+      status: "Suspended",
+      createdAt: new Date(now - 55 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_016",
+      reporterId: "9900000006",
+      reporterName: "Vishal Malhotra",
+      reportedId: "9800000001",
+      reportedName: "Arjun Sharma",
+      reportType: "Post",
+      reportedContentPreview: "Landmark judgment today...",
+      reason: "Spam",
+      status: "Pending",
+      createdAt: new Date(now - 58 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_017",
+      reporterId: "9900000007",
+      reporterName: "Meenakshi Gopalan",
+      reportedId: "9800000003",
+      reportedName: "Ravi Krishnan",
+      reportType: "User",
+      reason: "Misconduct",
+      status: "Banned",
+      createdAt: new Date(now - 60 * 24 * 60 * 60 * MS).toISOString(),
+    },
+    {
+      id: "rep_018",
+      reporterId: "9900000008",
+      reporterName: "Aditya Srinivasan",
+      reportedId: "9800000005",
+      reportedName: "Sameer Bose",
+      reportType: "Message",
+      reportedContentPreview: "Chat conversation",
+      reason: "Other",
+      note: "Strange behavior during consultation.",
+      status: "Pending",
+      createdAt: new Date(now - 7 * 24 * 60 * 60 * MS).toISOString(),
+    },
+  ];
+
+  const existing = safeParseArray<UserReport>(LS_REPORTS_KEY);
+  const merged = [...existing];
+  for (const r of demoReports) {
+    if (!merged.some((e) => e.id === r.id)) merged.push(r);
+  }
+  localStorage.setItem(LS_REPORTS_KEY, JSON.stringify(merged));
+  localStorage.setItem("myadvocate_reports_seeded_v1", "1");
+}
+
+function pushAccountNotification(userId: string, title: string, body: string) {
+  const notifications =
+    safeParseArray<Record<string, unknown>>(LS_NOTIFICATIONS_KEY);
+  notifications.unshift({
+    id: Date.now().toString(),
+    userId,
+    type: "verification",
+    title,
+    body,
+    avatarInitials: "MA",
+    avatarColor: "bg-red-600",
+    relatedTab: "profile",
+    timestamp: new Date().toISOString(),
+    read: false,
+  });
+  localStorage.setItem(LS_NOTIFICATIONS_KEY, JSON.stringify(notifications));
+}
+
+function reportDateInRange(iso: string, range: string): boolean {
+  if (range === "all") return true;
+  const d = new Date(iso).getTime();
+  const now = Date.now();
+  if (range === "today") return d >= now - 86400 * 1000;
+  if (range === "week") return d >= now - 7 * 86400 * 1000;
+  if (range === "month") return d >= now - 30 * 86400 * 1000;
+  return true;
+}
+
+function AdminUserReportsPage() {
+  useEffect(() => {
+    seedDemoReports();
+  }, []);
+
+  const [reports, setReports] = useState<UserReport[]>(() =>
+    safeParseArray<UserReport>(LS_REPORTS_KEY).sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    ),
+  );
+
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState<
+    "all" | "User" | "Post" | "Message"
+  >("all");
+  const [filterDate, setFilterDate] = useState("all");
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "Pending" | "Ignored" | "Warned" | "Suspended" | "Banned"
+  >("all");
+
+  const [viewTarget, setViewTarget] = useState<UserReport | null>(null);
+  const [warnTarget, setWarnTarget] = useState<UserReport | null>(null);
+  const [warnMessage, setWarnMessage] = useState("");
+  const [suspendTarget, setSuspendTarget] = useState<UserReport | null>(null);
+  const [banTarget, setBanTarget] = useState<UserReport | null>(null);
+
+  function refreshReports() {
+    setReports(
+      safeParseArray<UserReport>(LS_REPORTS_KEY).sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    );
+  }
+
+  function saveReport(updated: UserReport) {
+    const all = safeParseArray<UserReport>(LS_REPORTS_KEY);
+    const idx = all.findIndex((r) => r.id === updated.id);
+    if (idx >= 0) all[idx] = updated;
+    else all.push(updated);
+    localStorage.setItem(LS_REPORTS_KEY, JSON.stringify(all));
+  }
+
+  function handleIgnore(report: UserReport) {
+    const updated = { ...report, status: "Ignored" as const };
+    saveReport(updated);
+    refreshReports();
+    toast.success("Report marked as ignored");
+  }
+
+  function openWarn(report: UserReport) {
+    setWarnTarget(report);
+    setWarnMessage("");
+  }
+
+  function confirmWarn() {
+    if (!warnTarget) return;
+    if (!warnMessage.trim()) {
+      toast.error("Please enter a warning message");
+      return;
+    }
+    const updated = { ...warnTarget, status: "Warned" as const };
+    saveReport(updated);
+    pushAccountNotification(
+      warnTarget.reportedId,
+      "Account Warning",
+      warnMessage.trim(),
+    );
+    refreshReports();
+    setWarnTarget(null);
+    setWarnMessage("");
+    toast.success(`Warning sent to ${warnTarget.reportedName}`);
+  }
+
+  function confirmSuspend() {
+    if (!suspendTarget) return;
+    const updated = { ...suspendTarget, status: "Suspended" as const };
+    saveReport(updated);
+    saveAccountStatus(suspendTarget.reportedId, "Suspended");
+    pushAccountNotification(
+      suspendTarget.reportedId,
+      "Account Suspended",
+      "Your account has been suspended due to a policy violation.",
+    );
+    refreshReports();
+    setSuspendTarget(null);
+    toast.success(`${suspendTarget.reportedName} has been suspended`);
+  }
+
+  function confirmBan() {
+    if (!banTarget) return;
+    const updated = { ...banTarget, status: "Banned" as const };
+    saveReport(updated);
+    saveAccountStatus(banTarget.reportedId, "Banned");
+    pushAccountNotification(
+      banTarget.reportedId,
+      "Account Banned",
+      "Your account has been permanently banned due to repeated policy violations.",
+    );
+    refreshReports();
+    setBanTarget(null);
+    toast.success(`${banTarget.reportedName} has been permanently banned`);
+  }
+
+  const filteredReports = useMemo(() => {
+    const q = search.toLowerCase();
+    return reports.filter((r) => {
+      if (
+        q &&
+        !r.reporterName.toLowerCase().includes(q) &&
+        !r.reportedName.toLowerCase().includes(q)
+      )
+        return false;
+      if (filterType !== "all" && r.reportType !== filterType) return false;
+      if (!reportDateInRange(r.createdAt, filterDate)) return false;
+      if (filterStatus !== "all" && r.status !== filterStatus) return false;
+      return true;
+    });
+  }, [reports, search, filterType, filterDate, filterStatus]);
+
+  const summary = useMemo(
+    () => ({
+      total: reports.length,
+      pending: reports.filter((r) => r.status === "Pending").length,
+      ignored: reports.filter((r) => r.status === "Ignored").length,
+      warned: reports.filter((r) => r.status === "Warned").length,
+      suspendedBanned: reports.filter(
+        (r) => r.status === "Suspended" || r.status === "Banned",
+      ).length,
+    }),
+    [reports],
+  );
+
+  function StatusBadge({ status }: { status: UserReport["status"] }) {
+    const map: Record<UserReport["status"], { cls: string; label: string }> = {
+      Pending: {
+        cls: "bg-blue-100 text-blue-700 border-blue-200",
+        label: "Pending",
+      },
+      Ignored: {
+        cls: "bg-gray-100 text-gray-500 border-gray-200",
+        label: "Ignored",
+      },
+      Warned: {
+        cls: "bg-amber-100 text-amber-700 border-amber-200",
+        label: "Warned",
+      },
+      Suspended: {
+        cls: "bg-orange-100 text-orange-700 border-orange-200",
+        label: "Suspended",
+      },
+      Banned: {
+        cls: "bg-red-100 text-red-700 border-red-200",
+        label: "Banned",
+      },
+    };
+    const { cls, label } = map[status];
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${cls}`}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  function TypeBadge({ type }: { type: UserReport["reportType"] }) {
+    const map = {
+      User: "bg-blue-50 text-blue-600 border-blue-200",
+      Post: "bg-violet-50 text-violet-600 border-violet-200",
+      Message: "bg-teal-50 text-teal-600 border-teal-200",
+    };
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${map[type]}`}
+      >
+        {type}
+      </span>
+    );
+  }
+
+  return (
+    <div>
+      {/* Heading */}
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-slate-700">User Reports</h2>
+        <p className="text-sm text-slate-500">
+          Review and take action on reports submitted by users
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6"
+        data-ocid="admin.reports.summary_section"
+      >
+        {[
+          {
+            label: "Total Reports",
+            value: summary.total,
+            cls: "bg-blue-50",
+            iconCls: "text-blue-600",
+            ocid: "admin.reports.total_card",
+          },
+          {
+            label: "Pending",
+            value: summary.pending,
+            cls: "bg-amber-50",
+            iconCls: "text-amber-600",
+            ocid: "admin.reports.pending_card",
+          },
+          {
+            label: "Ignored",
+            value: summary.ignored,
+            cls: "bg-gray-50",
+            iconCls: "text-gray-500",
+            ocid: "admin.reports.ignored_card",
+          },
+          {
+            label: "Warned",
+            value: summary.warned,
+            cls: "bg-orange-50",
+            iconCls: "text-orange-600",
+            ocid: "admin.reports.warned_card",
+          },
+          {
+            label: "Suspended / Banned",
+            value: summary.suspendedBanned,
+            cls: "bg-red-50",
+            iconCls: "text-red-600",
+            ocid: "admin.reports.suspended_card",
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-3"
+            data-ocid={card.ocid}
+          >
+            <div className={`p-2.5 rounded-xl ${card.cls}`}>
+              <Flag className={`w-4 h-4 ${card.iconCls}`} />
+            </div>
+            <div>
+              <div className="text-xl font-bold text-slate-800">
+                {card.value}
+              </div>
+              <div className="text-xs text-slate-500 leading-tight">
+                {card.label}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter bar */}
+      <div className="mb-4 flex flex-col sm:flex-row gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Input
+            placeholder="Search reporter or reported name..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            data-ocid="admin.reports.search_input"
+          />
+        </div>
+        <Select
+          value={filterType}
+          onValueChange={(v) => setFilterType(v as typeof filterType)}
+        >
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reports.type_filter.select"
+          >
+            <SelectValue placeholder="All Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="User">User</SelectItem>
+            <SelectItem value="Post">Post</SelectItem>
+            <SelectItem value="Message">Message</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterDate} onValueChange={setFilterDate}>
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reports.date_filter.select"
+          >
+            <SelectValue placeholder="All Time" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="week">Last 7 Days</SelectItem>
+            <SelectItem value="month">Last 30 Days</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={filterStatus}
+          onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}
+        >
+          <SelectTrigger
+            className="w-36"
+            data-ocid="admin.reports.status_filter.select"
+          >
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="Pending">Pending</SelectItem>
+            <SelectItem value="Ignored">Ignored</SelectItem>
+            <SelectItem value="Warned">Warned</SelectItem>
+            <SelectItem value="Suspended">Suspended</SelectItem>
+            <SelectItem value="Banned">Banned</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="text-xs text-slate-400 mb-3">
+        Showing {filteredReports.length} of {reports.length} reports
+      </div>
+
+      {/* Table */}
+      {filteredReports.length === 0 ? (
+        <div
+          className="flex flex-col items-center justify-center py-16 text-slate-400"
+          data-ocid="admin.reports.empty_state"
+        >
+          <Flag className="w-12 h-12 mb-3 opacity-30" />
+          <p className="font-medium text-sm">No reports match your filters</p>
+          <p className="text-xs mt-1">
+            Try adjusting your search or filter criteria
+          </p>
+        </div>
+      ) : (
+        <div
+          className="bg-white rounded-xl border border-gray-200 overflow-hidden"
+          data-ocid="admin.reports.table"
+        >
+          {/* Header */}
+          <div className="hidden lg:grid grid-cols-[1.3fr_1.3fr_auto_1.5fr_auto_auto_auto] gap-3 px-5 py-3 bg-slate-50 border-b border-gray-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <div>Reporter</div>
+            <div>Reported</div>
+            <div>Type</div>
+            <div>Reason</div>
+            <div>Date</div>
+            <div>Status</div>
+            <div>Actions</div>
+          </div>
+
+          {/* Rows */}
+          <div>
+            {filteredReports.map((report, idx) => (
+              <div
+                key={report.id}
+                className="grid lg:grid-cols-[1.3fr_1.3fr_auto_1.5fr_auto_auto_auto] gap-3 px-5 py-4 border-b border-gray-50 last:border-0 items-center hover:bg-slate-50/70 transition-colors"
+                data-ocid={`admin.reports.row.${idx + 1}`}
+              >
+                {/* Reporter */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center text-xs font-bold text-violet-700 shrink-0">
+                    {report.reporterName
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                  <span className="text-sm font-medium text-slate-800 truncate">
+                    {report.reporterName}
+                  </span>
+                </div>
+
+                {/* Reported */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shrink-0">
+                    {report.reportedName
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                  <span className="text-sm font-medium text-blue-600 truncate">
+                    {report.reportedName}
+                  </span>
+                </div>
+
+                {/* Type */}
+                <div className="shrink-0">
+                  <TypeBadge type={report.reportType} />
+                </div>
+
+                {/* Reason + note */}
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700 font-medium">
+                    {report.reason}
+                  </p>
+                  {report.note && (
+                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                      {report.note}
+                    </p>
+                  )}
+                </div>
+
+                {/* Date */}
+                <div className="text-xs text-slate-400 shrink-0 whitespace-nowrap">
+                  {new Date(report.createdAt).toLocaleDateString("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </div>
+
+                {/* Status */}
+                <div className="shrink-0">
+                  <StatusBadge status={report.status} />
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setViewTarget(report)}
+                    className="p-1.5 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors"
+                    title="View full report"
+                    data-ocid={`admin.reports.view_button.${idx + 1}`}
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                  {report.status === "Pending" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleIgnore(report)}
+                        className="p-1.5 rounded-lg hover:bg-gray-50 text-slate-400 hover:text-gray-600 transition-colors"
+                        title="Ignore report"
+                        data-ocid={`admin.reports.ignore_button.${idx + 1}`}
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openWarn(report)}
+                        className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition-colors"
+                        title="Warn user"
+                        data-ocid={`admin.reports.warn_button.${idx + 1}`}
+                      >
+                        <AlertTriangle className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSuspendTarget(report)}
+                        className="p-1.5 rounded-lg hover:bg-orange-50 text-slate-400 hover:text-orange-600 transition-colors"
+                        title="Suspend account"
+                        data-ocid={`admin.reports.suspend_button.${idx + 1}`}
+                      >
+                        <UserX className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBanTarget(report)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                        title="Ban account"
+                        data-ocid={`admin.reports.ban_button.${idx + 1}`}
+                      >
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── View Full Report Modal ── */}
+      <Dialog
+        open={!!viewTarget}
+        onOpenChange={(o) => !o && setViewTarget(null)}
+      >
+        <DialogContent
+          className="max-w-lg"
+          data-ocid="admin.reports.view_modal"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flag className="w-4 h-4 text-red-500" />
+              Full Report
+            </DialogTitle>
+          </DialogHeader>
+          {viewTarget && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Reporter
+                  </div>
+                  <div className="font-semibold text-slate-800">
+                    {viewTarget.reporterName}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono">
+                    {viewTarget.reporterId}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Reported
+                  </div>
+                  <div className="font-semibold text-blue-600">
+                    {viewTarget.reportedName}
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono">
+                    {viewTarget.reportedId}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Type
+                  </div>
+                  <TypeBadge type={viewTarget.reportType} />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Status
+                  </div>
+                  <StatusBadge status={viewTarget.status} />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Reason
+                  </div>
+                  <div className="font-medium text-slate-700">
+                    {viewTarget.reason}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-0.5 font-medium uppercase">
+                    Date
+                  </div>
+                  <div className="text-slate-700">
+                    {new Date(viewTarget.createdAt).toLocaleDateString(
+                      "en-IN",
+                      {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      },
+                    )}
+                  </div>
+                </div>
+              </div>
+              {viewTarget.note && (
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                  <div className="text-xs text-slate-400 mb-1 font-medium uppercase">
+                    Additional Note
+                  </div>
+                  <p className="text-slate-700 leading-relaxed">
+                    {viewTarget.note}
+                  </p>
+                </div>
+              )}
+              {viewTarget.reportedContentPreview && (
+                <div className="bg-muted/40 rounded-lg p-3 border">
+                  <div className="text-xs text-slate-400 mb-1 font-medium uppercase">
+                    Content Preview
+                  </div>
+                  <p className="text-slate-600 text-xs italic">
+                    "{viewTarget.reportedContentPreview}"
+                  </p>
+                </div>
+              )}
+
+              {/* Actions inside modal */}
+              {viewTarget.status === "Pending" && (
+                <div className="flex gap-2 flex-wrap pt-1 border-t">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleIgnore(viewTarget);
+                      setViewTarget(null);
+                    }}
+                    data-ocid="admin.reports.view_ignore_button"
+                  >
+                    <XCircle className="w-3.5 h-3.5 mr-1" />
+                    Ignore
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={() => {
+                      setViewTarget(null);
+                      openWarn(viewTarget);
+                    }}
+                    data-ocid="admin.reports.view_warn_button"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 mr-1" />
+                    Warn
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-orange-600 hover:bg-orange-700 text-white"
+                    onClick={() => {
+                      setViewTarget(null);
+                      setSuspendTarget(viewTarget);
+                    }}
+                    data-ocid="admin.reports.view_suspend_button"
+                  >
+                    <UserX className="w-3.5 h-3.5 mr-1" />
+                    Suspend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      setViewTarget(null);
+                      setBanTarget(viewTarget);
+                    }}
+                    data-ocid="admin.reports.view_ban_button"
+                  >
+                    <Ban className="w-3.5 h-3.5 mr-1" />
+                    Ban
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setViewTarget(null)}
+              data-ocid="admin.reports.view_close_button"
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Warn Dialog ── */}
+      <Dialog
+        open={!!warnTarget}
+        onOpenChange={(o) => !o && setWarnTarget(null)}
+      >
+        <DialogContent
+          className="max-w-md"
+          data-ocid="admin.reports.warn_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="w-5 h-5" />
+              Warn User
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Enter a custom warning message for{" "}
+            <strong>{warnTarget?.reportedName}</strong>. This message will be
+            sent as an in-app notification.
+          </p>
+          <Textarea
+            placeholder="Enter warning message..."
+            value={warnMessage}
+            onChange={(e) => setWarnMessage(e.target.value)}
+            rows={3}
+            data-ocid="admin.reports.warn_textarea"
+          />
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setWarnTarget(null)}
+              data-ocid="admin.reports.warn_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={confirmWarn}
+              data-ocid="admin.reports.warn_confirm_button"
+            >
+              Send Warning
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Suspend Dialog ── */}
+      <Dialog
+        open={!!suspendTarget}
+        onOpenChange={(o) => !o && setSuspendTarget(null)}
+      >
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.reports.suspend_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-orange-700">
+              <UserX className="w-5 h-5" />
+              Suspend Account
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Are you sure you want to suspend{" "}
+            <strong>{suspendTarget?.reportedName}</strong>? They will lose
+            access until reactivated.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setSuspendTarget(null)}
+              data-ocid="admin.reports.suspend_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={confirmSuspend}
+              data-ocid="admin.reports.suspend_confirm_button"
+            >
+              Suspend Account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Ban Dialog ── */}
+      <Dialog open={!!banTarget} onOpenChange={(o) => !o && setBanTarget(null)}>
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.reports.ban_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <Ban className="w-5 h-5" />
+              Ban Account
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Are you sure you want to permanently ban{" "}
+            <strong>{banTarget?.reportedName}</strong>? This is a stronger
+            action than suspension.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setBanTarget(null)}
+              data-ocid="admin.reports.ban_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmBan}
+              data-ocid="admin.reports.ban_confirm_button"
+            >
+              Ban Account
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Analytics Page (formerly Reports) ────────────────────────────────────────
 const CHART_COLORS = [
   "#2563eb",
   "#10b981",
@@ -1618,7 +4112,7 @@ const CHART_COLORS = [
   "#ec4899",
 ];
 
-function AdminReportsPage() {
+function AdminAnalyticsPage() {
   const cases = useMemo(() => safeParseArray<CaseRecord>(LS_CASES_KEY), []);
   const reviews = useMemo(
     () => safeParseArray<AdvocateReview>(LS_REVIEWS_KEY),
@@ -1670,7 +4164,7 @@ function AdminReportsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-slate-700">Reports</h2>
+        <h2 className="text-lg font-semibold text-slate-700">Analytics</h2>
         <p className="text-sm text-slate-500">
           Platform analytics and performance metrics
         </p>
@@ -1791,132 +4285,555 @@ function AdminContentPage() {
         new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     ),
   );
+  const [contentStatus, setContentStatus] = useState<
+    Record<string, { hidden?: boolean; commentsDisabled?: boolean }>
+  >(() => getContentStatus());
   const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState<
+    "all" | "today" | "7days" | "30days"
+  >("all");
+  const [activityFilter, setActivityFilter] = useState<
+    "all" | "low" | "medium" | "high"
+  >("all");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "visible" | "hidden" | "comments_disabled"
+  >("all");
+  const [viewPost, setViewPost] = useState<UserPost | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  const filteredPosts = useMemo(() => {
-    const q = search.toLowerCase();
-    if (!q) return posts;
-    return posts.filter(
-      (p) =>
-        p.authorName.toLowerCase().includes(q) ||
-        p.text.toLowerCase().includes(q),
+  function refreshStatus() {
+    setContentStatus(getContentStatus());
+  }
+
+  function handleHideToggle(post: UserPost) {
+    const current = contentStatus[post.id]?.hidden ?? false;
+    saveContentStatus(post.id, { hidden: !current });
+    if (!current) {
+      pushContentNotification(post.authorMobile, "hidden");
+      toast.success("Post hidden from feed");
+    } else {
+      toast.success("Post restored to feed");
+    }
+    refreshStatus();
+  }
+
+  function handleCommentsToggle(post: UserPost) {
+    const current = contentStatus[post.id]?.commentsDisabled ?? false;
+    saveContentStatus(post.id, { commentsDisabled: !current });
+    toast.success(
+      current ? "Comments re-enabled" : "Comments disabled for post",
     );
-  }, [posts, search]);
+    refreshStatus();
+  }
 
   function handleDelete(id: string) {
+    const post = posts.find((p) => p.id === id);
     const all = safeParseArray<UserPost>(LS_FEED_POSTS_KEY);
     localStorage.setItem(
       LS_FEED_POSTS_KEY,
       JSON.stringify(all.filter((p) => p.id !== id)),
     );
+    // Remove from content status
+    const cs = getContentStatus();
+    delete cs[id];
+    localStorage.setItem(LS_CONTENT_STATUS_KEY, JSON.stringify(cs));
+    pushContentNotification(post?.authorMobile, "deleted");
     setPosts((prev) => prev.filter((p) => p.id !== id));
+    refreshStatus();
     setDeleteTarget(null);
     toast.success("Post deleted");
   }
 
+  const filteredPosts = useMemo(() => {
+    let result = [...posts];
+
+    // Search filter
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((p) => p.authorName.toLowerCase().includes(q));
+    }
+
+    // Date filter
+    if (dateFilter !== "all") {
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      result = result.filter((p) => {
+        const age = now - new Date(p.timestamp).getTime();
+        if (dateFilter === "today") return age < dayMs;
+        if (dateFilter === "7days") return age < 7 * dayMs;
+        if (dateFilter === "30days") return age < 30 * dayMs;
+        return true;
+      });
+    }
+
+    // Activity filter
+    if (activityFilter !== "all") {
+      result = result.filter((p) => {
+        const total = p.likes + p.comments;
+        if (activityFilter === "low") return total <= 5;
+        if (activityFilter === "medium") return total >= 6 && total <= 20;
+        if (activityFilter === "high") return total >= 21;
+        return true;
+      });
+    }
+
+    // Status filter
+    if (statusFilter !== "all") {
+      result = result.filter((p) => {
+        const cs = contentStatus[p.id];
+        if (statusFilter === "hidden") return cs?.hidden === true;
+        if (statusFilter === "comments_disabled")
+          return cs?.commentsDisabled === true && !cs?.hidden;
+        if (statusFilter === "visible")
+          return !cs?.hidden && !cs?.commentsDisabled;
+        return true;
+      });
+    }
+
+    return result;
+  }, [posts, search, dateFilter, activityFilter, statusFilter, contentStatus]);
+
+  // Summary stats
+  const totalPosts = posts.length;
+  const hiddenCount = posts.filter((p) => contentStatus[p.id]?.hidden).length;
+  const commentsDisabledCount = posts.filter(
+    (p) =>
+      contentStatus[p.id]?.commentsDisabled && !contentStatus[p.id]?.hidden,
+  ).length;
+  const visibleCount = totalPosts - hiddenCount;
+
   return (
     <div>
-      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-700">
-            Platform Content
-          </h2>
-          <p className="text-sm text-slate-500">
-            {posts.length} user-created posts
-          </p>
-        </div>
-        <div className="sm:ml-auto relative">
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="text-lg font-semibold text-slate-700">
+          Platform Content
+        </h2>
+        <p className="text-sm text-slate-500">
+          Manage and moderate user-created posts
+        </p>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {[
+          {
+            label: "Total Posts",
+            value: totalPosts,
+            color: "text-slate-700",
+            bg: "bg-slate-50",
+            icon: <Newspaper className="w-5 h-5 text-slate-400" />,
+          },
+          {
+            label: "Visible",
+            value: visibleCount,
+            color: "text-green-700",
+            bg: "bg-green-50",
+            icon: <Eye className="w-5 h-5 text-green-500" />,
+          },
+          {
+            label: "Hidden",
+            value: hiddenCount,
+            color: "text-slate-600",
+            bg: "bg-gray-50",
+            icon: <EyeOff className="w-5 h-5 text-slate-400" />,
+          },
+          {
+            label: "Comments Off",
+            value: commentsDisabledCount,
+            color: "text-amber-700",
+            bg: "bg-amber-50",
+            icon: <MessageCircleOff className="w-5 h-5 text-amber-500" />,
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className={`${card.bg} rounded-xl p-4 border border-gray-100 shadow-sm`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              {card.icon}
+            </div>
+            <p className={`text-2xl font-bold ${card.color}`}>{card.value}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{card.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter Bar */}
+      <div className="flex flex-wrap gap-3 mb-5">
+        <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <Input
-            placeholder="Search posts..."
+            placeholder="Search by author..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 w-64"
+            className="pl-9"
             data-ocid="admin.content.search_input"
           />
         </div>
+        <Select
+          value={dateFilter}
+          onValueChange={(v) =>
+            setDateFilter(v as "all" | "today" | "7days" | "30days")
+          }
+        >
+          <SelectTrigger className="w-40" data-ocid="admin.content.date_select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Time</SelectItem>
+            <SelectItem value="today">Today</SelectItem>
+            <SelectItem value="7days">Last 7 Days</SelectItem>
+            <SelectItem value="30days">Last 30 Days</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={activityFilter}
+          onValueChange={(v) =>
+            setActivityFilter(v as "all" | "low" | "medium" | "high")
+          }
+        >
+          <SelectTrigger
+            className="w-44"
+            data-ocid="admin.content.activity_select"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Levels</SelectItem>
+            <SelectItem value="low">Low (0–5)</SelectItem>
+            <SelectItem value="medium">Medium (6–20)</SelectItem>
+            <SelectItem value="high">High (21+)</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={statusFilter}
+          onValueChange={(v) =>
+            setStatusFilter(
+              v as "all" | "visible" | "hidden" | "comments_disabled",
+            )
+          }
+        >
+          <SelectTrigger
+            className="w-44"
+            data-ocid="admin.content.status_select"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="visible">Visible</SelectItem>
+            <SelectItem value="hidden">Hidden</SelectItem>
+            <SelectItem value="comments_disabled">Comments Disabled</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
+      {/* Post List */}
       {filteredPosts.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
+        <div
+          data-ocid="admin.content.empty_state"
+          className="text-center py-16 text-slate-400"
+        >
           <Newspaper className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>{search ? "No posts match your search" : "No posts yet"}</p>
+          <p>
+            {search ||
+            dateFilter !== "all" ||
+            activityFilter !== "all" ||
+            statusFilter !== "all"
+              ? "No posts match your filters"
+              : "No posts yet"}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {filteredPosts.map((post, idx) => (
-            <div
-              key={post.id}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm p-4"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700 shrink-0">
-                  {post.authorName
-                    .split(" ")
-                    .map((w) => w[0])
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-slate-800 text-sm">
-                      {post.authorName}
-                    </span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-slate-400">
+          {filteredPosts.map((post, idx) => {
+            const cs = contentStatus[post.id];
+            const isHidden = cs?.hidden === true;
+            const isCommentsDisabled = cs?.commentsDisabled === true;
+            const totalEngagement = post.likes + post.comments;
+
+            return (
+              <div
+                key={post.id}
+                className={`bg-white rounded-xl border shadow-sm p-4 transition-all ${
+                  isHidden ? "border-gray-200 opacity-75" : "border-gray-200"
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  {/* Author Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700 shrink-0">
+                    {post.authorName
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    {/* Top row: name + date + status badge */}
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-800 text-sm">
+                          {post.authorName}
+                        </span>
+                        {isHidden ? (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 bg-gray-100 text-gray-600 border-gray-200"
+                          >
+                            Hidden
+                          </Badge>
+                        ) : isCommentsDisabled ? (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border-amber-200"
+                          >
+                            Comments Disabled
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border-green-200"
+                          >
+                            Visible
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400 shrink-0">
                         {new Date(post.timestamp).toLocaleDateString("en-IN", {
                           day: "numeric",
                           month: "short",
                           year: "numeric",
                         })}
                       </span>
+                    </div>
+
+                    {/* Content preview */}
+                    <p className="text-sm text-slate-600 mt-1.5 line-clamp-2">
+                      {post.text}
+                    </p>
+
+                    {/* Engagement */}
+                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Heart className="w-3 h-3" /> {post.likes}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MessageCircle className="w-3 h-3" /> {post.comments}
+                      </span>
+                      <span className="text-slate-300">
+                        Engagement: {totalEngagement}
+                        {totalEngagement <= 5
+                          ? " (Low)"
+                          : totalEngagement <= 20
+                            ? " (Medium)"
+                            : " (High)"}
+                      </span>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1.5 text-slate-600"
+                        onClick={() => setViewPost(post)}
+                        data-ocid={`admin.content.view_button.${idx + 1}`}
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        View
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-7 text-xs gap-1.5 ${
+                          isHidden
+                            ? "text-blue-600 border-blue-200 hover:bg-blue-50"
+                            : "text-slate-600 hover:text-slate-800"
+                        }`}
+                        onClick={() => handleHideToggle(post)}
+                        data-ocid={`admin.content.hide_button.${idx + 1}`}
+                      >
+                        {isHidden ? (
+                          <>
+                            <Eye className="w-3.5 h-3.5" /> Unhide
+                          </>
+                        ) : (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5" /> Hide
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-7 text-xs gap-1.5 ${
+                          isCommentsDisabled
+                            ? "text-amber-600 border-amber-200 hover:bg-amber-50"
+                            : "text-slate-600 hover:text-slate-800"
+                        }`}
+                        onClick={() => handleCommentsToggle(post)}
+                        data-ocid={`admin.content.comments_button.${idx + 1}`}
+                      >
+                        {isCommentsDisabled ? (
+                          <>
+                            <MessageCircle className="w-3.5 h-3.5" /> Enable
+                            Comments
+                          </>
+                        ) : (
+                          <>
+                            <MessageCircleOff className="w-3.5 h-3.5" /> Disable
+                            Comments
+                          </>
+                        )}
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0"
+                        className="h-7 text-xs gap-1.5 text-red-500 hover:text-red-700 hover:bg-red-50"
                         onClick={() => setDeleteTarget(post.id)}
                         data-ocid={`admin.content.delete_button.${idx + 1}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
+                        Delete
                       </Button>
                     </div>
                   </div>
-                  <p className="text-sm text-slate-600 mt-1.5 line-clamp-3">
-                    {post.text}
-                  </p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
-                    <span>👍 {post.likes}</span>
-                    <span>💬 {post.comments}</span>
-                    <span>↗ {post.shares}</span>
-                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {/* View Post Modal */}
+      <Dialog open={!!viewPost} onOpenChange={(o) => !o && setViewPost(null)}>
+        <DialogContent
+          className="max-w-lg max-h-[80vh] overflow-y-auto"
+          data-ocid="admin.content.view_modal"
+        >
+          <DialogHeader>
+            <DialogTitle>Post Details</DialogTitle>
+          </DialogHeader>
+          {viewPost && (
+            <div className="space-y-4">
+              {/* Author */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700 shrink-0">
+                  {viewPost.authorName
+                    .split(" ")
+                    .map((w) => w[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase()}
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-800 text-sm">
+                    {viewPost.authorName}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {new Date(viewPost.timestamp).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                    })}
+                  </p>
+                </div>
+                <div className="ml-auto">
+                  {contentStatus[viewPost.id]?.hidden ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-gray-100 text-gray-600"
+                    >
+                      Hidden
+                    </Badge>
+                  ) : contentStatus[viewPost.id]?.commentsDisabled ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-100 text-amber-700"
+                    >
+                      Comments Disabled
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="secondary"
+                      className="bg-green-100 text-green-700"
+                    >
+                      Visible
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Post text */}
+              <div className="bg-slate-50 rounded-xl p-4">
+                <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                  {viewPost.text}
+                </p>
+              </div>
+
+              {/* Image if present */}
+              {viewPost.imageDataUrl && (
+                <div className="rounded-xl overflow-hidden">
+                  <img
+                    src={viewPost.imageDataUrl}
+                    alt="Post attachment"
+                    className="w-full object-cover max-h-64"
+                  />
+                </div>
+              )}
+
+              {/* Engagement stats */}
+              <div className="flex items-center gap-4 text-sm text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <Heart className="w-4 h-4 text-red-400" />
+                  {viewPost.likes} likes
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <MessageCircle className="w-4 h-4 text-blue-400" />
+                  {viewPost.comments} comments
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewPost(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirm */}
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent
+          className="max-w-sm"
+          data-ocid="admin.content.delete_dialog"
+        >
           <DialogHeader>
             <DialogTitle>Delete Post?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-slate-600">
-            This will permanently remove the post from the feed.
+            This will permanently remove the post and notify the author. This
+            cannot be undone.
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              data-ocid="admin.content.cancel_delete_button"
+            >
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
+              data-ocid="admin.content.confirm_delete_button"
             >
               Delete
             </Button>
@@ -1935,14 +4852,35 @@ function AdminSettingsPage() {
     }>(LS_ADMIN_SETTINGS_KEY);
     return { autoApprove: saved.autoApprove || false };
   });
+  const [ps, setPs] = useState<PlatformSettings>(() => getPlatformSettings());
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const storageUsage = useMemo(() => getLocalStorageUsage(), []);
   const lastSync = useMemo(() => new Date().toLocaleString("en-IN"), []);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
-  function saveSettings(updated: typeof adminSettings) {
+  function saveAdminSettings(updated: typeof adminSettings) {
     setAdminSettings(updated);
     localStorage.setItem(LS_ADMIN_SETTINGS_KEY, JSON.stringify(updated));
     toast.success("Settings saved");
+  }
+
+  function savePlatformSettings(newPs: PlatformSettings) {
+    setPs(newPs);
+    localStorage.setItem(LS_PLATFORM_SETTINGS_KEY, JSON.stringify(newPs));
+  }
+
+  function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      savePlatformSettings({ ...ps, customLogoBase64: base64 });
+      toast.success("Logo updated");
+    };
+    reader.readAsDataURL(file);
+    // Reset input so same file can be re-selected
+    e.target.value = "";
   }
 
   function handleClearDemoData() {
@@ -1968,14 +4906,302 @@ function AdminSettingsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-slate-700">Settings</h2>
+        <h2 className="text-lg font-semibold text-slate-700">
+          Platform Settings
+        </h2>
         <p className="text-sm text-slate-500">
-          Admin panel configuration and platform settings
+          Configure platform identity, announcements, and access controls
         </p>
       </div>
 
       <div className="space-y-5 max-w-2xl">
-        {/* Admin Credentials */}
+        {/* ── Section 1: Platform Identity ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
+            <Globe className="w-4 h-4 text-blue-500" />
+            Platform Identity
+          </h3>
+          <div className="space-y-4">
+            {/* Platform Name */}
+            <div>
+              <Label
+                htmlFor="platform-name"
+                className="text-sm font-medium text-slate-700 mb-1.5 block"
+              >
+                Platform Name
+              </Label>
+              <input
+                id="platform-name"
+                data-ocid="admin.settings.platform_name.input"
+                type="text"
+                placeholder="My Advocate"
+                value={ps.platformName}
+                onChange={(e) => setPs({ ...ps, platformName: e.target.value })}
+                className="w-full h-10 px-3 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition-colors"
+              />
+            </div>
+
+            {/* Platform Description */}
+            <div>
+              <Label
+                htmlFor="platform-desc"
+                className="text-sm font-medium text-slate-700 mb-1.5 block"
+              >
+                Platform Description
+              </Label>
+              <Textarea
+                id="platform-desc"
+                data-ocid="admin.settings.platform_desc.textarea"
+                placeholder="India's Professional Legal Network"
+                value={ps.platformDescription}
+                onChange={(e) =>
+                  setPs({ ...ps, platformDescription: e.target.value })
+                }
+                rows={3}
+                className="resize-none text-sm"
+              />
+            </div>
+
+            {/* Platform Logo */}
+            <div>
+              <Label className="text-sm font-medium text-slate-700 mb-1.5 block">
+                Platform Logo
+              </Label>
+              <p className="text-xs text-slate-500 mb-2">
+                Upload to replace the header logo (stored as base64)
+              </p>
+              {ps.customLogoBase64 && (
+                <div className="mb-3 flex items-center gap-3">
+                  <img
+                    src={ps.customLogoBase64}
+                    alt="Current platform logo"
+                    style={{ height: 50, width: "auto", maxWidth: 200 }}
+                    className="object-contain border border-gray-100 rounded-lg p-1"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => {
+                      savePlatformSettings({ ...ps, customLogoBase64: "" });
+                      toast.success("Logo removed");
+                    }}
+                    data-ocid="admin.settings.remove_logo.button"
+                  >
+                    Remove Logo
+                  </Button>
+                </div>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-xs"
+                onClick={() => logoInputRef.current?.click()}
+                data-ocid="admin.settings.upload_logo.button"
+              >
+                {ps.customLogoBase64 ? "Replace Logo" : "Upload Logo"}
+              </Button>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+            </div>
+
+            {/* Save Identity */}
+            <Button
+              type="button"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => {
+                savePlatformSettings(ps);
+                toast.success("Platform identity saved");
+              }}
+              data-ocid="admin.settings.save_identity.button"
+            >
+              Save Identity
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Section 2: Announcement Banner ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
+            <Megaphone className="w-4 h-4 text-amber-500" />
+            Announcement Banner
+          </h3>
+          <div className="space-y-4">
+            {/* Enabled toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-slate-700">
+                  Show banner in main app
+                </div>
+                <div className="text-xs text-slate-500">
+                  Displays below the header on every page load
+                </div>
+              </div>
+              <Switch
+                data-ocid="admin.settings.announcement_enabled.switch"
+                checked={ps.announcementEnabled}
+                onCheckedChange={(v) =>
+                  setPs({ ...ps, announcementEnabled: v })
+                }
+              />
+            </div>
+
+            {/* Banner text & color — visible only when enabled */}
+            {ps.announcementEnabled && (
+              <div className="space-y-3 pt-1">
+                <div>
+                  <Label
+                    htmlFor="announcement-text"
+                    className="text-sm font-medium text-slate-700 mb-1.5 block"
+                  >
+                    Announcement Text
+                  </Label>
+                  <Textarea
+                    id="announcement-text"
+                    data-ocid="admin.settings.announcement_text.textarea"
+                    placeholder="Enter announcement text..."
+                    value={ps.announcementText}
+                    onChange={(e) =>
+                      setPs({ ...ps, announcementText: e.target.value })
+                    }
+                    rows={3}
+                    className="resize-none text-sm"
+                  />
+                </div>
+
+                {/* Color selector */}
+                <div>
+                  <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                    Banner Color
+                  </Label>
+                  <div className="flex gap-2">
+                    {(["info", "warning", "success"] as const).map((color) => {
+                      const labels = {
+                        info: "Info (Blue)",
+                        warning: "Warning (Amber)",
+                        success: "Success (Green)",
+                      };
+                      const styles = {
+                        info:
+                          ps.announcementColor === "info"
+                            ? "bg-blue-600 text-white border-blue-600"
+                            : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+                        warning:
+                          ps.announcementColor === "warning"
+                            ? "bg-amber-500 text-white border-amber-500"
+                            : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100",
+                        success:
+                          ps.announcementColor === "success"
+                            ? "bg-emerald-600 text-white border-emerald-600"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100",
+                      };
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          data-ocid={`admin.settings.banner_color_${color}.button`}
+                          onClick={() =>
+                            setPs({ ...ps, announcementColor: color })
+                          }
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${styles[color]}`}
+                        >
+                          {labels[color]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Save Banner */}
+            <Button
+              type="button"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => {
+                savePlatformSettings(ps);
+                toast.success("Banner settings saved");
+              }}
+              data-ocid="admin.settings.save_banner.button"
+            >
+              Save Banner
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Section 3: Access Controls ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-slate-500" />
+            Access Controls
+          </h3>
+          <div className="space-y-4">
+            {/* Disable registrations */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div
+                  className={`text-sm font-medium ${ps.registrationsDisabled ? "text-red-600" : "text-slate-700"}`}
+                >
+                  Disable New Registrations
+                </div>
+                <div className="text-xs text-slate-500">
+                  {ps.registrationsDisabled
+                    ? "New users cannot register"
+                    : "New user registrations are open"}
+                </div>
+              </div>
+              <Switch
+                data-ocid="admin.settings.disable_registrations.switch"
+                checked={ps.registrationsDisabled}
+                onCheckedChange={(v) => {
+                  const newPs = { ...ps, registrationsDisabled: v };
+                  savePlatformSettings(newPs);
+                  toast.success(
+                    v ? "Registrations disabled" : "Registrations enabled",
+                  );
+                }}
+              />
+            </div>
+
+            <div className="h-px bg-gray-100" />
+
+            {/* Disable posting */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div
+                  className={`text-sm font-medium ${ps.postingDisabled ? "text-red-600" : "text-slate-700"}`}
+                >
+                  Disable Feed Posting
+                </div>
+                <div className="text-xs text-slate-500">
+                  {ps.postingDisabled
+                    ? "Advocates cannot create new posts"
+                    : "Feed posting is open to advocates"}
+                </div>
+              </div>
+              <Switch
+                data-ocid="admin.settings.disable_posting.switch"
+                checked={ps.postingDisabled}
+                onCheckedChange={(v) => {
+                  const newPs = { ...ps, postingDisabled: v };
+                  savePlatformSettings(newPs);
+                  toast.success(v ? "Posting disabled" : "Posting enabled");
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Section 4: Admin Credentials ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
             <Lock className="w-4 h-4 text-slate-500" />
@@ -2019,11 +5245,11 @@ function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Platform Settings */}
+        {/* ── Section 5: Platform Config (Demo Mode + Auto-Approve) ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
             <Settings className="w-4 h-4 text-slate-500" />
-            Platform Settings
+            Demo Configuration
           </h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -2047,16 +5273,17 @@ function AdminSettingsPage() {
                 </div>
               </div>
               <Switch
+                data-ocid="admin.settings.auto_approve.switch"
                 checked={adminSettings.autoApprove}
                 onCheckedChange={(v) =>
-                  saveSettings({ ...adminSettings, autoApprove: v })
+                  saveAdminSettings({ ...adminSettings, autoApprove: v })
                 }
               />
             </div>
           </div>
         </div>
 
-        {/* Platform Stats */}
+        {/* ── Section 6: Platform Stats ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <h3 className="text-base font-semibold text-slate-700 mb-4 flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-slate-500" />
@@ -2078,7 +5305,7 @@ function AdminSettingsPage() {
           </div>
         </div>
 
-        {/* Danger Zone */}
+        {/* ── Section 7: Danger Zone ── */}
         <div className="bg-white rounded-xl border border-red-200 shadow-sm p-5">
           <h3 className="text-base font-semibold text-red-600 mb-4 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4" />
@@ -2098,6 +5325,7 @@ function AdminSettingsPage() {
               variant="destructive"
               onClick={() => setClearConfirmOpen(true)}
               className="shrink-0"
+              data-ocid="admin.settings.clear_data.button"
             >
               Clear Data
             </Button>
@@ -2119,10 +5347,15 @@ function AdminSettingsPage() {
             <Button
               variant="outline"
               onClick={() => setClearConfirmOpen(false)}
+              data-ocid="admin.settings.clear_data.cancel_button"
             >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleClearDemoData}>
+            <Button
+              variant="destructive"
+              onClick={handleClearDemoData}
+              data-ocid="admin.settings.clear_data.confirm_button"
+            >
               Yes, Clear All Data
             </Button>
           </DialogFooter>
@@ -2138,7 +5371,8 @@ const PAGE_TITLES: Record<AdminPage, string> = {
   verification: "Advocate Verification",
   users: "Users",
   reviews: "Reviews",
-  reports: "Reports",
+  reports: "User Reports",
+  analytics: "Analytics",
   content: "Platform Content",
   settings: "Settings",
 };
@@ -2171,7 +5405,8 @@ function AdminDashboardShell({ onLogout }: { onLogout: () => void }) {
             {activePage === "verification" && <AdminVerificationPage />}
             {activePage === "users" && <AdminUsersPage />}
             {activePage === "reviews" && <AdminReviewsPage />}
-            {activePage === "reports" && <AdminReportsPage />}
+            {activePage === "reports" && <AdminUserReportsPage />}
+            {activePage === "analytics" && <AdminAnalyticsPage />}
             {activePage === "content" && <AdminContentPage />}
             {activePage === "settings" && <AdminSettingsPage />}
           </ScrollArea>

@@ -16,6 +16,7 @@ import {
   Globe,
   HelpCircle,
   House,
+  Info,
   LogOut,
   Menu,
   MessageSquare,
@@ -27,6 +28,72 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+// ─── Platform Settings (inline helper to avoid circular dep with AdminPanel) ──
+
+interface PlatformSettingsLocal {
+  platformName?: string;
+  customLogoBase64?: string;
+  announcementEnabled?: boolean;
+  announcementText?: string;
+  announcementColor?: "info" | "warning" | "success";
+}
+
+function readPlatformSettings(): PlatformSettingsLocal {
+  try {
+    const v = localStorage.getItem("myadvocate_platform_settings");
+    if (!v) return {};
+    return JSON.parse(v) as PlatformSettingsLocal;
+  } catch {
+    return {};
+  }
+}
+
+// ─── Announcement Banner ──────────────────────────────────────────────────────
+
+function AnnouncementBanner({
+  settings,
+}: {
+  settings: PlatformSettingsLocal;
+}) {
+  const dismissKey = `myadvocate_banner_dismissed_${settings.announcementText || ""}`;
+  const [dismissed, setDismissed] = useState(
+    () => sessionStorage.getItem(dismissKey) === "1",
+  );
+
+  if (!settings.announcementEnabled || !settings.announcementText || dismissed)
+    return null;
+
+  const colorMap: Record<string, string> = {
+    info: "bg-blue-50 border-blue-200 text-blue-800",
+    warning: "bg-amber-50 border-amber-200 text-amber-800",
+    success: "bg-emerald-50 border-emerald-200 text-emerald-800",
+  };
+  const color = colorMap[settings.announcementColor || "info"];
+
+  function handleDismiss() {
+    sessionStorage.setItem(dismissKey, "1");
+    setDismissed(true);
+  }
+
+  return (
+    <div
+      className={`border-b px-4 py-2.5 flex items-start gap-2 ${color}`}
+      data-ocid="announcement.banner"
+    >
+      <Info className="w-4 h-4 mt-0.5 shrink-0" />
+      <span className="text-sm flex-1">{settings.announcementText}</span>
+      <button
+        type="button"
+        onClick={handleDismiss}
+        aria-label="Dismiss announcement"
+        className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -293,17 +360,23 @@ function TopHeader({
   onSearchClick,
   onNotificationClick,
   notificationUnreadCount = 0,
+  platformSettings,
 }: {
   onHamburgerClick: () => void;
   onSearchClick: () => void;
   onNotificationClick: () => void;
   notificationUnreadCount?: number;
+  platformSettings: PlatformSettingsLocal;
 }) {
+  const logoSrc =
+    platformSettings.customLogoBase64 ||
+    "/assets/uploads/Create-a-clean-professional-horizontal-logo-for-a-legal-platform-called-_MY-ADVOCATE_.__Design-style__mod.al-legal-branding.__Logo-structure__-A-circular-emblem-on-the-left-containing-a-stylized-symbol-of-justice_-hands-suppor-1.jpg";
+
   return (
     <header
       data-ocid="header.section"
       className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[400px] z-40 flex items-center justify-between px-3 bg-white border-b border-border shadow-sm"
-      style={{ height: 76 }}
+      style={{ height: 56 }}
     >
       {/* Hamburger menu — fixed width so logo can center against it */}
       <button
@@ -312,23 +385,31 @@ function TopHeader({
         aria-label="Open menu"
         onClick={onHamburgerClick}
         className="flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
-        style={{ width: 44, height: 44 }}
+        style={{ width: 40, height: 40 }}
       >
         <Menu className="w-6 h-6" />
       </button>
 
-      {/* Center logo — absolutely centered between icons */}
+      {/* Center logo — absolutely centered in header */}
       <div
         className="absolute inset-0 flex items-center justify-center pointer-events-none"
-        style={{ left: 60, right: 100 }}
+        style={{ left: 52, right: 92 }}
       >
         <img
-          src="/assets/uploads/file_000000003c74720b8f411065c41e45f4-2-1.png"
+          src={logoSrc}
           alt="My Advocate – India's Professional Legal Network"
-          style={{ height: 56, width: "auto", maxWidth: "100%" }}
+          style={{ height: 44, width: "auto", maxWidth: "100%" }}
           className="object-contain"
           draggable={false}
         />
+        {platformSettings.platformName && (
+          <span
+            className="text-slate-700 font-medium truncate ml-2"
+            style={{ fontSize: 12, maxWidth: "40%" }}
+          >
+            {platformSettings.platformName}
+          </span>
+        )}
       </div>
 
       {/* Right icons — fixed width to balance with hamburger */}
@@ -780,6 +861,9 @@ export function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [platformSettings] = useState<PlatformSettingsLocal>(() =>
+    readPlatformSettings(),
+  );
 
   function handleSearchClick() {
     setSearchOpen(true);
@@ -798,6 +882,7 @@ export function AppShell({
         onSearchClick={handleSearchClick}
         onNotificationClick={handleNotificationClick}
         notificationUnreadCount={notificationUnreadCount}
+        platformSettings={platformSettings}
       />
 
       {/* Side drawer */}
@@ -823,8 +908,10 @@ export function AppShell({
       {/* Main content area — padded to avoid header/nav overlap */}
       <main
         className="flex-1 overflow-y-auto"
-        style={{ paddingTop: 76, paddingBottom: 64 }}
+        style={{ paddingTop: 56, paddingBottom: 64 }}
       >
+        {/* Announcement banner — below fixed header, above content */}
+        <AnnouncementBanner settings={platformSettings} />
         {children ?? <TabPlaceholder tab={activeTab} />}
       </main>
 
